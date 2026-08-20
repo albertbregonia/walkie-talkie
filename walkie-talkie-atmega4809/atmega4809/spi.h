@@ -16,7 +16,7 @@ typedef struct SPIConfig {
 	const bool data_order_lsb; // bit 6 - DORD
 	const bool master; // bit 5 - MASTER
 	const bool clk_double_speed_enabled; // bit 4 - clock CLK2X
-	const SPI_PRESC_t prescalar; // bits 2:1 - PRESC[1:0]
+	const SPI_PRESC_t prescaler; // bits 2:1 - PRESC[1:0]
 	
 	// CLTRB register
 	const bool buffer_mode_enabled; 
@@ -44,7 +44,7 @@ static inline void configure_spi(const SPIConfig_t config) {
 		(config.data_order_lsb << SPI_DORD_bp) |
 		(config.master << SPI_MASTER_bp) |
 		(config.clk_double_speed_enabled << SPI_CLK2X_bp) |
-		config.prescalar;
+		config.prescaler;
 
 	config.spi->CTRLB =
 		(config.buffer_mode_enabled << SPI_BUFEN_bp) |

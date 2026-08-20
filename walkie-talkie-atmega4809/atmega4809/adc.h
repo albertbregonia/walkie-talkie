@@ -16,7 +16,7 @@ typedef struct ADCConfig {
 	// CTRLC register
 	const bool reduced_size_sampling_capacitance_enabled; // SAMPCAP false for <1V, true for higher ref voltages
 	const ADC_REFSEL_t voltage_reference;
-	const ADC_PRESC_t prescalar;
+	const ADC_PRESC_t prescaler;
 	
 	// TODO: CTRLD, CTRLE, SAMPCTRL, EVCTRL registers
 	
@@ -39,7 +39,7 @@ static inline void configure_adc(const ADCConfig_t config) {
 	config.adc->CTRLC = 
 		(config.reduced_size_sampling_capacitance_enabled << ADC_SAMPCAP_bp) |
 		(config.voltage_reference) |
-		(config.prescalar);
+		(config.prescaler);
 	
 	config.adc->INTCTRL =
 		(config.window_comparator_interrupt_enabled << ADC_WCMP_bp) |

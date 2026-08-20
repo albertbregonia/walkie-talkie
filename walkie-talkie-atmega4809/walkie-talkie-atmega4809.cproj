@@ -138,6 +138,9 @@
     <Compile Include="atmega4809\adc.h">
       <SubType>compile</SubType>
     </Compile>
+    <Compile Include="atmega4809\cpu.h">
+      <SubType>compile</SubType>
+    </Compile>
     <Compile Include="atmega4809\sleep.h">
       <SubType>compile</SubType>
     </Compile>

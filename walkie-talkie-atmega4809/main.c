@@ -1,6 +1,8 @@
+#define F_CPU 20000000UL
 #include <avr/io.h>
 #include <avr/interrupt.h>
 
+#include "atmega4809/cpu.h"
 #include "atmega4809/spi.h"
 #include "atmega4809/adc.h"
 #include "atmega4809/sleep.h"
@@ -31,6 +33,7 @@ const MCP4921_t mcp4921 = {
 };
 
 static inline void setup(void) {
+	disable_cpu_prescaler(); // 20 MHz
 	// we can only use standby bc the ADC does not support SLEEP_MODE_PWR_DOWN
 	configure_sleep(SLEEP_MODE_STANDBY);
 	configure_spi_bus();
@@ -42,7 +45,7 @@ static inline void setup(void) {
 		.freerun_enabled = true,
 		.result_ready_interrupt_enabled = true,
 		.pins = ADC_MUXPOS_AIN8_gc,
-		.prescalar = ADC_PRESC_DIV2_gc, // 3.333 MHz / 2 prescalar = 1.667 MHz (although datasheet states 1.5MHz maximum @ 10bits)
+		.prescaler = ADC_PRESC_DIV8_gc, // 20 MHz / 8 prescaler = 2.5 MHz (although datasheet states 1.5MHz maximum @ 10bits)
 	});
 	enable_adc(&ADC0);
 	start_adc_conversion(&ADC0);
@@ -60,7 +63,7 @@ int main(void) {
 		// 
 		// HOWEVER, this is just a test to ensure the ADC and the DAC code works
 		// there is no specific timing here (even though there should be)
-		// in the current state, we are simply gauging the kind of audio possible (highest bit depth and sample rate @ 3.333MHz)
+		// in the current state, we are simply gauging the kind of audio possible (highest bit depth and sample rate @ 2.5MHz ADC)
 		if(ADC0.INTFLAGS & ADC_RESRDY_bm) {
 			mcp4921_write(&mcp4921, (MCP4921Header_t) {
 				.gain_2x_disabled = true,
