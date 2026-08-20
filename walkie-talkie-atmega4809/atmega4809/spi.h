@@ -15,21 +15,21 @@ typedef struct SPIConfig {
 	// CTRLA register
 	const bool data_order_lsb; // bit 6 - DORD
 	const bool master; // bit 5 - MASTER
-	const bool clk_double_speed; // bit 4 - clock CLK2X
+	const bool clk_double_speed_enabled; // bit 4 - clock CLK2X
 	const SPI_PRESC_t prescalar; // bits 2:1 - PRESC[1:0]
 	
 	// CLTRB register
-	const bool buffer_mode; 
-	const bool buffer_mode_wait_for_receive;
-	const bool client_select_disable;
+	const bool buffer_mode_enabled; 
+	const bool buffer_mode_wait_for_receive_enabled;
+	const bool client_select_disabled;
 	const SPI_MODE_t spi_mode;
 	
 	// INTCTRL register
-	const bool buffer_mode_receive_complete_interrupt; // bit 7 - RXCIE
-	const bool buffer_mode_transfer_complete_interrupt; // bit 6 - TXCIE
-	const bool buffer_mode_data_register_empty_interrupt; // bit 5 - DREIE
-	const bool buffer_mode_client_select_trigger_interrupt; // bit 4 - SSIE
-	const bool non_buffer_mode_interrupt; // bit 0 - IE triggered when RXCIF/IF is set in int flags
+	const bool buffer_mode_receive_complete_interrupt_enabled; // bit 7 - RXCIE
+	const bool buffer_mode_transfer_complete_interrupt_enabled; // bit 6 - TXCIE
+	const bool buffer_mode_data_register_empty_interrupt_enabled; // bit 5 - DREIE
+	const bool buffer_mode_client_select_trigger_interrupt_enabled; // bit 4 - SSIE
+	const bool non_buffer_mode_interrupt_enabled; // bit 0 - IE triggered when RXCIF/IF is set in int flags
 	
 	// TWISPIROUTEA register (PORTMUX)
 	const PORTMUX_SPI0_t pins;
@@ -43,21 +43,21 @@ static inline void configure_spi(const SPIConfig_t config) {
 	config.spi->CTRLA =
 		(config.data_order_lsb << SPI_DORD_bp) |
 		(config.master << SPI_MASTER_bp) |
-		(config.clk_double_speed << SPI_CLK2X_bp) |
+		(config.clk_double_speed_enabled << SPI_CLK2X_bp) |
 		config.prescalar;
 
 	config.spi->CTRLB =
-		(config.buffer_mode << SPI_BUFEN_bp) |
-		(config.buffer_mode_wait_for_receive << SPI_BUFWR_bp) |
-		(config.client_select_disable << SPI_SSD_bp) |
+		(config.buffer_mode_enabled << SPI_BUFEN_bp) |
+		(config.buffer_mode_wait_for_receive_enabled << SPI_BUFWR_bp) |
+		(config.client_select_disabled << SPI_SSD_bp) |
 		config.spi_mode;
 	
 	config.spi->INTCTRL =
-		(config.buffer_mode_receive_complete_interrupt << SPI_RXCIE_bp) |
-		(config.buffer_mode_transfer_complete_interrupt << SPI_TXCIE_bp) |
-		(config.buffer_mode_data_register_empty_interrupt << SPI_DREIE_bp) |
-		(config.buffer_mode_client_select_trigger_interrupt << SPI_SSIE_bp) |
-		(config.non_buffer_mode_interrupt << SPI_IE_bp);
+		(config.buffer_mode_receive_complete_interrupt_enabled << SPI_RXCIE_bp) |
+		(config.buffer_mode_transfer_complete_interrupt_enabled << SPI_TXCIE_bp) |
+		(config.buffer_mode_data_register_empty_interrupt_enabled << SPI_DREIE_bp) |
+		(config.buffer_mode_client_select_trigger_interrupt_enabled << SPI_SSIE_bp) |
+		(config.non_buffer_mode_interrupt_enabled << SPI_IE_bp);
 		
 	// configure SPI pins based on PORTMUX group config
 	PORTMUX.TWISPIROUTEA = (PORTMUX.TWISPIROUTEA & 0b11111100) | (config.pins);
@@ -66,7 +66,7 @@ static inline void configure_spi(const SPIConfig_t config) {
 		case PORTMUX_SPI0_DEFAULT_gc: // PA[7:4]
 			PORTA.DIRSET = PIN6_bm | PIN4_bm; // SCK, MOSI - outputs
 			PORTA.DIRCLR = PIN5_bm; // MISO - input
-			if(!config.client_select_disable) { // multi-host support
+			if(!config.client_select_disabled) { // multi-host support
 				PORTA.DIRCLR = PIN7_bm;
 				PORTA.PIN7CTRL |= PORT_PULLUPEN_bm;
 			} 
@@ -77,7 +77,7 @@ static inline void configure_spi(const SPIConfig_t config) {
 		case PORTMUX_SPI0_ALT1_gc: // PC[3:0]
 			PORTC.DIRSET = PIN2_bm | PIN0_bm; // SCK, MOSI - outputs
 			PORTC.DIRCLR = PIN1_bm; // MISO - input
-			if(!config.client_select_disable) { // multi-host support
+			if(!config.client_select_disabled) { // multi-host support
 				PORTC.DIRCLR = PIN3_bm;
 				PORTC.PIN3CTRL |= PORT_PULLUPEN_bm;
 			}
@@ -85,7 +85,7 @@ static inline void configure_spi(const SPIConfig_t config) {
 		case PORTMUX_SPI0_ALT2_gc: // PE[3:0]
 			PORTE.DIRSET = PIN2_bm | PIN0_bm; // SCK, MOSI - outputs
 			PORTE.DIRCLR = PIN1_bm; // MISO - input
-			if(!config.client_select_disable) { // multi-host support
+			if(!config.client_select_disabled) { // multi-host support
 				PORTE.DIRCLR = PIN3_bm;
 				PORTE.PIN3CTRL |= PORT_PULLUPEN_bm;
 			}

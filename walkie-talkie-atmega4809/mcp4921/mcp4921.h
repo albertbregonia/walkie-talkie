@@ -37,7 +37,7 @@ typedef struct MCP4921 {
 typedef struct MCP4921Header {
 	const bool write_disabled;
 	const bool buffered;
-	const bool disable_2x_gain;
+	const bool gain_2x_disabled;
 	const bool enable;
 	const uint16_t value;
 } MCP4921Header_t;
@@ -65,7 +65,7 @@ static inline void mcp4921_write(
 ) {
 	const uint16_t value = MCP4921_WRITE_gc |
 		(header.buffered << MCP4921_BUF_bp) |
-		(header.disable_2x_gain << MCP4921_GAIN_bp) |
+		(header.gain_2x_disabled << MCP4921_GAIN_bp) |
 		(header.enable << MCP4921_SHDN_bp) |
 		(MCP4921_COMMAND_bm & header.value); // clear top bits for command header
 		
