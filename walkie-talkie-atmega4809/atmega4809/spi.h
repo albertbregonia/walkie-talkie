@@ -59,7 +59,40 @@ static inline void configure_spi(const SPIConfig_t config) {
 		(config.buffer_mode_client_select_trigger_interrupt << SPI_SSIE_bp) |
 		(config.non_buffer_mode_interrupt << SPI_IE_bp);
 		
+	// configure SPI pins based on PORTMUX group config
 	PORTMUX.TWISPIROUTEA = (PORTMUX.TWISPIROUTEA & 0b11111100) | (config.pins);
+	
+	switch(config.pins) {
+		case PORTMUX_SPI0_DEFAULT_gc: // PA[7:4]
+			PORTA.DIRSET = PIN6_bm | PIN4_bm; // SCK, MOSI - outputs
+			PORTA.DIRCLR = PIN5_bm; // MISO - input
+			if(!config.client_select_disable) { // multi-host support
+				PORTA.DIRCLR = PIN7_bm;
+				PORTA.PIN7CTRL |= PORT_PULLUPEN_bm;
+			} 
+			// datasheet says that if client_select_disable=false and SS is an input
+			// that's the only way SS will be used by SPI for multi-host support
+			// otherwise, it's regular GPIO
+			break;
+		case PORTMUX_SPI0_ALT1_gc: // PC[3:0]
+			PORTC.DIRSET = PIN2_bm | PIN0_bm; // SCK, MOSI - outputs
+			PORTC.DIRCLR = PIN1_bm; // MISO - input
+			if(!config.client_select_disable) { // multi-host support
+				PORTC.DIRCLR = PIN3_bm;
+				PORTC.PIN3CTRL |= PORT_PULLUPEN_bm;
+			}
+			break;
+		case PORTMUX_SPI0_ALT2_gc: // PE[3:0]
+			PORTE.DIRSET = PIN2_bm | PIN0_bm; // SCK, MOSI - outputs
+			PORTE.DIRCLR = PIN1_bm; // MISO - input
+			if(!config.client_select_disable) { // multi-host support
+				PORTE.DIRCLR = PIN3_bm;
+				PORTE.PIN3CTRL |= PORT_PULLUPEN_bm;
+			}
+			break;
+		case PORTMUX_SPI0_NONE_gc:
+		default: break; // do nothing, exhaustive
+	}
 }
 
 static inline void enable_spi(SPI_t* const spi) {
