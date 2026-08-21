@@ -156,6 +156,12 @@
     <Compile Include="mcp4921\mcp4921.h">
       <SubType>compile</SubType>
     </Compile>
+    <Compile Include="nrf24L01\constants.h">
+      <SubType>compile</SubType>
+    </Compile>
+    <Compile Include="nrf24L01\nrf24L01.h">
+      <SubType>compile</SubType>
+    </Compile>
   </ItemGroup>
   <ItemGroup>
     <Folder Include="mcp4921" />

@@ -8,6 +8,11 @@
 #include "atmega4809/sleep.h"
 #include "mcp4921/mcp4921.h"
 
+// IRQ ports need to be defined before the import
+#define NRF24L01_IRQ_PORT PORTA
+#define NRF24L01_IRQ_PIN_bp PIN2_bp
+#include "nrf24L01/nrf24L01.h"
+
 static inline void configure_spi_bus() {
 	configure_spi((SPIConfig_t) {
 		.spi = &SPI0,
@@ -17,14 +22,13 @@ static inline void configure_spi_bus() {
 		// assume defaults for the others
 	});
 	enable_spi(&SPI0);
-	// TODO: !SS should be set in the setup function for the radio
 }
 
-uint8_t send_spi(uint8_t value) {
-	SPI0.DATA = value;
-	while(!(SPI0.INTFLAGS & SPI_IF_bm)); // poll
-	return value;
+uint8_t send_spi(uint8_t mosi) {
+	return send_spi_poll_completion_non_buffer(&SPI0, mosi);
 }
+
+// PERIPHERAL CONFIGURATIONS
 
 const MCP4921_t mcp4921 = {
 	.chip_select_pin_bp = PIN3_bp,
@@ -32,12 +36,18 @@ const MCP4921_t mcp4921 = {
 	.send_spi = send_spi,
 };
 
+const nrf24L01_t nrf = {
+	.chip_select_pin_bp = PIN7_bp,
+	.chip_select_port = &PORTA,
+	.chip_enable_pin_bp = PIN3_bp,
+	.chip_enable_port = &PORTA,
+	.send_spi = send_spi,
+};
+
 static inline void setup(void) {
-	disable_cpu_prescaler(); // 20 MHz
+	disable_cpu_prescaler(); // enable 20 MHz
 	// we can only use standby bc the ADC does not support SLEEP_MODE_PWR_DOWN
 	configure_sleep(SLEEP_MODE_STANDBY);
-	configure_spi_bus();
-	configure_mcp4921(&mcp4921);
 	configure_adc((ADCConfig_t) {
 		.adc = &ADC0,
 		.run_standby_enabled = true,
@@ -47,13 +57,19 @@ static inline void setup(void) {
 		.pins = ADC_MUXPOS_AIN8_gc,
 		.prescaler = ADC_PRESC_DIV8_gc, // 20 MHz / 8 prescaler = 2.5 MHz (although datasheet states 1.5MHz maximum @ 10bits)
 	});
+	configure_spi_bus();
+	configure_mcp4921(&mcp4921);
+	configure_nrf24L01(&nrf);
+	
 	enable_adc(&ADC0);
-	start_adc_conversion(&ADC0);
 }
 
 int main(void) {
 	setup();
 	sei();
+	start_adc_conversion(&ADC0);
+	uint8_t volatile status = nrf24L01_read_register(&nrf, REGISTER_STATUS);
+	asm volatile ("nop"); // breakpoint to read default status register values
     while(1) {
 		// interestingly enough, having the ISR call mcp4921_write is "less performant" (reduces our playback rate)
 		// this is because the .lss shows that all the registers need to be pushed to the stack
