@@ -1,4 +1,4 @@
-#define F_CPU 20000000UL
+#define F_CPU 2500000UL
 #include <avr/io.h>
 #include <avr/interrupt.h>
 
@@ -45,7 +45,7 @@ const nrf24L01_t nrf = {
 };
 
 static inline void setup(void) {
-	disable_cpu_prescaler(); // enable 20 MHz
+	set_cpu_prescaler(CLKCTRL_PDIV_8X_gc); // enable 2.5 MHz aka 20 MHz / 8
 	// we can only use standby bc the ADC does not support SLEEP_MODE_PWR_DOWN
 	configure_sleep(SLEEP_MODE_STANDBY);
 	configure_adc((ADCConfig_t) {
@@ -55,11 +55,11 @@ static inline void setup(void) {
 		.freerun_enabled = true,
 		.result_ready_interrupt_enabled = true,
 		.pins = ADC_MUXPOS_AIN8_gc,
-		.prescaler = ADC_PRESC_DIV8_gc, // 20 MHz / 8 prescaler = 2.5 MHz (although datasheet states 1.5MHz maximum @ 10bits)
+		.prescaler = ADC_PRESC_DIV2_gc, // 20 MHz / 8 prescaler = 2.5 MHz (although datasheet states 1.5MHz maximum @ 10bits)
 	});
 	configure_spi_bus();
 	configure_mcp4921(&mcp4921);
-	configure_nrf24L01(&nrf);
+	configure_nrf24L01_pins(&nrf);
 	
 	enable_adc(&ADC0);
 }
