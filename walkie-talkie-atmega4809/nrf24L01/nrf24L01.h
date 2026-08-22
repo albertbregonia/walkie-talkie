@@ -67,5 +67,4 @@ static inline uint8_t nrf24L01_read_register(const nrf24L01_t* const nrf, uint8_
 	return miso;
 }
 
-
 #endif /* NRF24L01_H_ */
