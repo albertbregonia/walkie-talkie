@@ -61,7 +61,7 @@ static inline void configure_nrf24L01_pins(const nrf24L01_t* const nrf) {
 
 static inline uint8_t nrf24L01_read_register(const nrf24L01_t* const nrf, uint8_t address) {
 	nrf24L01_select(nrf, true);
-	nrf->send_spi(CMD_R_REGISTER | (CMD_R_REGISTER_MASK & address));
+	nrf->send_spi(CMD_R_REGISTER(address));
 	uint8_t miso = nrf->send_spi(CMD_NOP);
 	nrf24L01_select(nrf, false);
 	return miso;
