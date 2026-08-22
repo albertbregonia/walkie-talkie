@@ -2,16 +2,21 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 
+// ATmega4809 HAL
 #include "atmega4809/cpu.h"
 #include "atmega4809/spi.h"
 #include "atmega4809/adc.h"
 #include "atmega4809/sleep.h"
-#include "mcp4921/mcp4921.h"
+#include "atmega4809/periodic_timer.h"
 
+// peripheral HALs
+#include "mcp4921/mcp4921.h"
 // IRQ ports need to be defined before the import
 #define NRF24L01_IRQ_PORT PORTA
 #define NRF24L01_IRQ_PIN_bp PIN2_bp
 #include "nrf24L01/nrf24L01.h"
+
+#define PLAYBACK_RATE(AUDIO_SAMPLE_RATE) ((F_CPU / AUDIO_SAMPLE_RATE) - 1) 
 
 static inline void configure_spi_bus() {
 	configure_spi((SPIConfig_t) {
@@ -60,27 +65,35 @@ static inline void setup(void) {
 	configure_spi_bus();
 	configure_mcp4921(&mcp4921);
 	configure_nrf24L01_pins(&nrf);
+	configure_periodic_interrupt_timer((PeriodicInterruptTimerConfig_t) {
+		.timer = &TCB0,
+		.run_standby_enabled = true,
+		.max_value = PLAYBACK_RATE(48000),
+	});
+	enable_tcb(&TCB0);
+	
+	// TEMP: use event signal system to let CPU continue to sleep until we need to sample
+	// timer counter will run at 48kHz and signal the ADC to sample
+	// the main will immediately play the sample afterward
+	// (basically scales the CPU down to 48kHz accurately)
+	EVSYS.CHANNEL0 = EVSYS_GENERATOR_TCB0_CAPT_gc; // TCB signals ADC
+	EVSYS.USERADC0 = EVSYS_CHANNEL_CHANNEL0_gc; // ADC accepts signals
+	ADC0.EVCTRL |= ADC_STARTEI_bm; // enable event trigger
 	
 	enable_adc(&ADC0);
 }
 
 int main(void) {
 	setup();
-	sei();
-	start_adc_conversion(&ADC0);
 	uint8_t volatile status = nrf24L01_read_register(&nrf, REGISTER_STATUS);
 	asm volatile ("nop"); // breakpoint to read default status register values
+	sei();
     while(1) {
-		// interestingly enough, having the ISR call mcp4921_write is "less performant" (reduces our playback rate)
-		// this is because the .lss shows that all the registers need to be pushed to the stack
-		// this means a lot of cycles are wasted before the next audio sample is played
-		// therefore, we use the interrupt to simply wake the CPU from sleep but use main() to write the sample
-		// (assuming mcp4921_write() is always faster than obtaining the next ADC result)
-		// 
-		// HOWEVER, this is just a test to ensure the ADC and the DAC code works
-		// there is no specific timing here (even though there should be)
-		// in the current state, we are simply gauging the kind of audio possible (highest bit depth and sample rate @ 2.5MHz ADC)
 		if(ADC0.INTFLAGS & ADC_RESRDY_bm) {
+			// NOTE: compiling in debug -Og seems to have a significant performance impact
+			// however, compiling in release -Os seems to have the same performance
+			// as writing the values directly without the abstraction
+			// ive tried to physically optimize around it, may simply decrease prescalers during debug mode to avoid that
 			mcp4921_write(&mcp4921, (MCP4921Header_t) {
 				.gain_2x_disabled = true,
 				.enable = true,
