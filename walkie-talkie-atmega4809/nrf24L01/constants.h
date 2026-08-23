@@ -35,5 +35,27 @@
 #define W_TX_PAYLOAD_NOACK 0b10110000 // (tx mode) disable AUTOACK on this specific packet (datasheet has a typo and says it's only 7 bits so we assume it should have the last 0 lol)
 
 #define CMD_NOP 0xFF // no operation, "might be used to read status register"
+
+// CONFIG register
+#define REGISTER_CONFIG 0x00
+// bit 7 is reserved for 0 only
+#define CONFIG_MASK_RX_DR_bp 6 // default 0, 1 to disable RX_DR interrupt on IRQ
+#define CONFIG_MASK_TX_DS_bp 5 // defualt 0, 1 to disable TX_DS interrupt on IRQ
+#define CONFIG_MASK_MAX_RT_bp 4 // default 0, 1 to disable MAX_RT interrupt on IRQ
+#define CONFIG_EN_CRC_bp 3 // default 1, enable CRC (forced high if one of the bits in EN_AA is high)
+#define CONFIG_CRCO_bp 2 // default 0 (1 byte), 1 for 2 bytes, CRC encoding scheme
+#define CONFIG_PWR_UP_bp 1 // default 0, 1 for power up, 0 for power down
+#define CONFIG_PRIM_RX_bp 0 // 1 for subscriber, 0 for publisher, default 0
+
+// STATUS register
 #define REGISTER_STATUS 0x07
+// bit 7 is reserved for 0 only
+#define STATUS_RX_DR_bp 6 // data ready interrupt, write 1 to clear
+#define STATUS_TX_DS_bp 5 // data sent interrupt, write 1 to clear - if AUTO_ACK then it will interrupt when ack'ed
+#define STATUS_MAX_RT_bp 4 // max TX retransmit interrupt, write 1 to clear, blocks communication while set
+// read-only STATUS bits
+// NOTE: data pipe 0b110 is not used and 111 is FIFO empty
+#define STATUS_RX_P_NO(STATUS) ((0b00001110 & STATUS) >> 1) // use this macro to get 0-5 (000-101) 
+#define STATUS_TX_FULL_bp(STATUS) (1 & STATUS) // true if TX FIFO is full
+
 #endif /* CONSTANTS_H_ */

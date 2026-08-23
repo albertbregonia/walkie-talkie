@@ -53,54 +53,56 @@ static inline void setup(void) {
 	set_cpu_prescaler(CLKCTRL_PDIV_8X_gc); // enable 2.5 MHz aka 20 MHz / 8
 	// we can only use standby bc the ADC does not support SLEEP_MODE_PWR_DOWN
 	configure_sleep(SLEEP_MODE_STANDBY);
-	configure_adc((ADCConfig_t) {
-		.adc = &ADC0,
-		.run_standby_enabled = true,
-		.resolution = ADC_RESSEL_10BIT_gc,
-		.freerun_enabled = true,
-		.result_ready_interrupt_enabled = true,
-		.pins = ADC_MUXPOS_AIN8_gc,
-		.prescaler = ADC_PRESC_DIV2_gc, // 20 MHz / 8 prescaler = 2.5 MHz (although datasheet states 1.5MHz maximum @ 10bits)
-	});
 	configure_spi_bus();
 	configure_mcp4921(&mcp4921);
 	configure_nrf24L01_pins(&nrf);
-	configure_periodic_interrupt_timer((PeriodicInterruptTimerConfig_t) {
-		.timer = &TCB0,
-		.run_standby_enabled = true,
-		.max_value = PLAYBACK_RATE(48000),
-	});
-	enable_tcb(&TCB0);
-	
-	// TEMP: use event signal system to let CPU continue to sleep until we need to sample
-	// timer counter will run at 48kHz and signal the ADC to sample
-	// the main will immediately play the sample afterward
-	// (basically scales the CPU down to 48kHz accurately)
-	EVSYS.CHANNEL0 = EVSYS_GENERATOR_TCB0_CAPT_gc; // TCB signals ADC
-	EVSYS.USERADC0 = EVSYS_CHANNEL_CHANNEL0_gc; // ADC accepts signals
-	ADC0.EVCTRL |= ADC_STARTEI_bm; // enable event trigger
-	
-	enable_adc(&ADC0);
+// 	configure_periodic_interrupt_timer((PeriodicInterruptTimerConfig_t) {
+// 		.timer = &TCB0,
+// 		.run_standby_enabled = true,
+// 		.max_value = PLAYBACK_RATE(48000),
+// 	});
+// 	configure_adc((ADCConfig_t) {
+// 		.adc = &ADC0,
+// 		.run_standby_enabled = true,
+// 		.resolution = ADC_RESSEL_10BIT_gc,
+// 		.freerun_enabled = true,
+// 		.result_ready_interrupt_enabled = true,
+// 		.pins = ADC_MUXPOS_AIN8_gc,
+// 		.prescaler = ADC_PRESC_DIV2_gc, // 2.5 MHz / 2 = 1.25 MHz
+// 	});
+//	enable_tcb(&TCB0);
+//	enable_adc(&ADC0);
+}
+
+ISR(PORTA_PORT_vect) {
+	cli();
+	PORTA.INTFLAGS |= (1 << NRF24L01_IRQ_PIN_bp); // clear interrupt flag
+	nrf24L01_clear_irq(&nrf, CLEAR_ALL_HEADER);
+	// blink LED upon packet sent
+	PORTF.OUTCLR = PIN5_bm;
+	_delay_ms(500);
+	PORTF.OUTSET = PIN5_bm;
+	_delay_ms(500);
+	sei();
 }
 
 int main(void) {
 	setup();
-	uint8_t volatile status = nrf24L01_read_register(&nrf, REGISTER_STATUS);
-	asm volatile ("nop"); // breakpoint to read default status register values
+	PORTF.DIR = PIN5_bm; // built-in LED
+	PORTF.OUTSET = PIN5_bm; // turn off LED, connected to pullup
+	
+	// basic software reset, this should be cleared by power on reset
+	// realistically, the radio module should be connected to a transistor
+	// with a GPIO on the gate so we can just hard-reset and then re-init to a known config
+	nrf24L01_clear_irq(&nrf, CLEAR_ALL_HEADER);
+	nrf24L01_power_up(&nrf); // default TX mode
+	_delay_ms(1.5); // datasheet spec
+	nrf24L01_chip_enable(&nrf, true); // hold high for continuous streaming (standby 2)
+	
+	uint8_t data[] = {0xAB, 0xCD}; // 2 bytes
 	sei();
     while(1) {
-		if(ADC0.INTFLAGS & ADC_RESRDY_bm) {
-			// NOTE: compiling in debug -Og seems to have a significant performance impact
-			// however, compiling in release -Os seems to have the same performance
-			// as writing the values directly without the abstraction
-			// ive tried to physically optimize around it, may simply decrease prescalers during debug mode to avoid that
-			mcp4921_write(&mcp4921, (MCP4921Header_t) {
-				.gain_2x_disabled = true,
-				.enable = true,
-				// ADC.RES is 10-bit, shift once to move closer to 12-bit max
-				.value = ADC0.RES << 1,
-			});
-		}
+		nrf24L01_stream_packet(&nrf, 2, data);
 		sleep_cpu();
 	}
 }
