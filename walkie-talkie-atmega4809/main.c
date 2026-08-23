@@ -80,9 +80,9 @@ ISR(PORTA_PORT_vect) {
 	nrf24L01_clear_irq(&nrf, CLEAR_ALL_HEADER);
 	// blink LED upon packet sent
 	PORTF.OUTCLR = PIN5_bm;
-	_delay_ms(500);
+	_delay_ms(50);
 	PORTF.OUTSET = PIN5_bm;
-	_delay_ms(500);
+	_delay_ms(50);
 	sei();
 }
 
@@ -90,19 +90,20 @@ int main(void) {
 	setup();
 	PORTF.DIR = PIN5_bm; // built-in LED
 	PORTF.OUTSET = PIN5_bm; // turn off LED, connected to pullup
-	
-	// basic software reset, this should be cleared by power on reset
-	// realistically, the radio module should be connected to a transistor
-	// with a GPIO on the gate so we can just hard-reset and then re-init to a known config
-	nrf24L01_clear_irq(&nrf, CLEAR_ALL_HEADER);
-	nrf24L01_power_up(&nrf); // default TX mode
-	_delay_ms(1.5); // datasheet spec
-	nrf24L01_chip_enable(&nrf, true); // hold high for continuous streaming (standby 2)
-	
+
+	const bool stream = true; // NOTE: change this value to test both streaming and burst send
+	configure_nrf24L01(&nrf, (nrf24L01Config_t) {
+		.stream = stream, // default TX
+		.power_up = true,
+	});
 	uint8_t data[] = {0xAB, 0xCD}; // 2 bytes
 	sei();
     while(1) {
-		nrf24L01_stream_packet(&nrf, 2, data);
+		if(stream) {
+			nrf24L01_stream_packet(&nrf, 2, data);	
+		} else {
+			nrf24L01_send_packet(&nrf, 2, data);
+		}
 		sleep_cpu();
 	}
 }
