@@ -2,7 +2,6 @@
 #define NRF24L01_H_
 
 #include <util/delay.h>
-#include <stdlib.h> // for size_t
 #include "constants.h"
 
 // helper macros
@@ -126,6 +125,12 @@ static inline uint8_t nrf24L01Config_to_byte(const nrf24L01Config_t config) {
 	);
 }
 
+void nrf24L01_flush(const nrf24L01_t* const nrf, const bool subscriber) {
+	nrf24L01_select(nrf, true);
+	nrf->send_spi(subscriber ? CMD_FLUSH_RX : CMD_FLUSH_TX); // FLUSH RX/TX
+	nrf24L01_select(nrf, false);
+}
+
 // NOT supposed to be publicly used
 static inline void nrf24L01_wait_for_power_up() {
 	_delay_ms(1.5); // datasheet spec
@@ -134,13 +139,12 @@ static inline void nrf24L01_wait_for_power_up() {
 // NOTE: does not set PRIM_RX in the CONFIG register
 // simply handles everything AFTER the config register is set
 // NOT supposed to be publicly used (but F_CPU requires it being here to use _delay_us())
-static inline void nrf24L01_handle_mode_transition(
+static inline void nrf24L01_handle_transceiver_mode_transition(
 	const nrf24L01_t* const nrf,
 	const bool subscriber,
 	const bool stream
 ) {
 	nrf24L01_chip_enable(nrf, true); // readers and streaming writers we hold CE=1
-	
 	// if we are a writer but not streaming, we only need to pulse CE
 	if(!subscriber && !stream) {
 		// datasheet says that CE=1 for 10+ us will transition into TX mode
@@ -164,29 +168,90 @@ static inline void configure_nrf24L01(const nrf24L01_t* const nrf, const nrf24L0
 	// extra operations that need to be executed based on config
 	if(config.power_up) {
 		nrf24L01_wait_for_power_up();
-		nrf24L01_handle_mode_transition(nrf, config.subscriber, config.stream);
+		nrf24L01_handle_transceiver_mode_transition(nrf, config.subscriber, config.stream);
 	}
 }
 
+typedef enum nrf24L01Pipe {
+	RX_PW_P0 = 0x11,
+	RX_PW_P1, // implicit 0x12 onward
+	RX_PW_P2,
+	RX_PW_P3,
+	RX_PW_P4,
+	RX_PW_P5,
+} nrf24L01Pipe_t;
+
+// using this enum allows us to guarantee a valid pipe packet width/size
+// as uint8_t is our smallest type that allows 0-255 but we only support 0-32
+typedef enum nrf24L01PipePacketWidth {
+	PIPE_UNUSED = 0,
+	PACKET_WIDTH_1BYTE, // implicit 1-32
+	PACKET_WIDTH_2BYTES,
+	PACKET_WIDTH_3BYTES,
+	PACKET_WIDTH_4BYTES,
+	PACKET_WIDTH_5BYTES,
+	PACKET_WIDTH_6BYTES,
+	PACKET_WIDTH_7BYTES,
+	PACKET_WIDTH_8BYTES,
+	PACKET_WIDTH_9BYTES,
+	PACKET_WIDTH_10BYTES,
+	PACKET_WIDTH_11BYTES,
+	PACKET_WIDTH_12BYTES,
+	PACKET_WIDTH_13BYTES,
+	PACKET_WIDTH_14BYTES,
+	PACKET_WIDTH_15BYTES,
+	PACKET_WIDTH_16BYTES,
+	PACKET_WIDTH_17BYTES,
+	PACKET_WIDTH_18BYTES,
+	PACKET_WIDTH_19BYTES,
+	PACKET_WIDTH_20BYTES,
+	PACKET_WIDTH_21BYTES,
+	PACKET_WIDTH_22BYTES,
+	PACKET_WIDTH_23BYTES,
+	PACKET_WIDTH_24BYTES,
+	PACKET_WIDTH_25BYTES,
+	PACKET_WIDTH_26BYTES,
+	PACKET_WIDTH_27BYTES,
+	PACKET_WIDTH_28BYTES,
+	PACKET_WIDTH_29BYTES,
+	PACKET_WIDTH_30BYTES,
+	PACKET_WIDTH_31BYTES,
+	PACKET_WIDTH_32BYTES,
+} nrf24L01PipePacketWidth_t;
+
+// pre-req: `pipe` is enabled in EN_RXADDR
+static inline void nrf24L01_set_pipe_packet_width(
+	const nrf24L01_t* const nrf,
+	const nrf24L01Pipe_t pipe,
+	const nrf24L01PipePacketWidth_t width
+) {
+	nrf24L01_write_register(nrf, pipe, width);
+}
+
+// pre-reqs: PWR_UP=1, PRIM_RX=0, CE=1 for at least (10 + 130)us to enter TX mode
 void nrf24L01_stream_packet(
 	const nrf24L01_t* const nrf, 
-	const size_t packet_size, 
-	const uint8_t data[packet_size]
+	const nrf24L01PipePacketWidth_t size,
+	const uint8_t data[size]
 ) {
 	nrf24L01_select(nrf, true);
 	nrf->send_spi(CMD_W_TX_PAYLOAD);
-	for(size_t i=0; i<packet_size; i++) {
+	for(uint8_t i=0; i<size; i++) {
 		nrf->send_spi(data[i]);
 	}
 	nrf24L01_select(nrf, false);
 }
 
+// pre-reqs: PWR_UP=1, PRIM_RX=0
+// CE will be pulsed long enough to transition to TX mode (11us)
+// but will not wait for TX mode to settle and finish sending
+// this is done so that the dev decides interrupt/polling for flow control
 void nrf24L01_send_packet(
 	const nrf24L01_t* const nrf, 
-	const size_t packet_size, 
-	const uint8_t data[packet_size]
+	const nrf24L01PipePacketWidth_t size, 
+	const uint8_t data[size]
 ) {
-	nrf24L01_stream_packet(nrf, packet_size, data);
+	nrf24L01_stream_packet(nrf, size, data);
 	// pulse CE=1 for 10+ us according to datasheet
 	nrf24L01_chip_enable(nrf, true);
 	_delay_us(11);

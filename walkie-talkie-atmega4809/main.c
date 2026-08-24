@@ -77,7 +77,7 @@ static inline void setup(void) {
 ISR(PORTA_PORT_vect) {
 	cli();
 	PORTA.INTFLAGS |= (1 << NRF24L01_IRQ_PIN_bp); // clear interrupt flag
-	nrf24L01_clear_irq(&nrf, CLEAR_ALL_HEADER);
+	uint8_t volatile status = nrf24L01_clear_irq(&nrf, CLEAR_ALL_HEADER);
 	// blink LED upon packet sent
 	PORTF.OUTCLR = PIN5_bm;
 	_delay_ms(50);
@@ -95,12 +95,14 @@ int main(void) {
 	configure_nrf24L01(&nrf, (nrf24L01Config_t) {
 		.stream = stream, // default TX
 		.power_up = true,
+		.max_retransmit_interrupt_disabled = true,
 	});
+	nrf24L01_write_register(&nrf, 1, 0); // TEMP: disable ack so our only interrupt is data sent
 	uint8_t data[] = {0xAB, 0xCD}; // 2 bytes
 	sei();
     while(1) {
 		if(stream) {
-			nrf24L01_stream_packet(&nrf, 2, data);	
+			nrf24L01_stream_packet(&nrf, PACKET_WIDTH_2BYTES, data);	
 		} else {
 			nrf24L01_send_packet(&nrf, 2, data);
 		}
