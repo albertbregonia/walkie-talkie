@@ -65,24 +65,37 @@ static inline void setup(void) {
 // 		.adc = &ADC0,
 // 		.run_standby_enabled = true,
 // 		.resolution = ADC_RESSEL_10BIT_gc,
-// 		.freerun_enabled = true,
+// 		.freerun_enabled = false,
 // 		.result_ready_interrupt_enabled = true,
 // 		.pins = ADC_MUXPOS_AIN8_gc,
-// 		.prescaler = ADC_PRESC_DIV2_gc, // 2.5 MHz / 2 = 1.25 MHz
+// 		.prescaler = ADC_PRESC_DIV4_gc, // 2.5 MHz / 2 = 1.25 MHz
 // 	});
-//	enable_tcb(&TCB0);
-//	enable_adc(&ADC0);
+// 	enable_tcb(&TCB0);
+// 	enable_adc(&ADC0);
 }
 
 ISR(PORTA_PORT_vect) {
 	cli();
 	PORTA.INTFLAGS |= (1 << NRF24L01_IRQ_PIN_bp); // clear interrupt flag
 	uint8_t volatile status = nrf24L01_clear_irq(&nrf, CLEAR_ALL_HEADER);
-	// blink LED upon packet sent
-	PORTF.OUTCLR = PIN5_bm;
-	_delay_ms(50);
-	PORTF.OUTSET = PIN5_bm;
-	_delay_ms(50);
+	if(nrf24L01_is_data_ready(status)) {
+		// blink LED slow when RX recv
+		PORTF.OUTCLR = PIN5_bm;
+		_delay_ms(500);
+		PORTF.OUTSET = PIN5_bm;
+		_delay_ms(500);
+		nrf24L01_flush(&nrf, true); // since we don't read the data, we must flush or else communication stops
+	}
+	if(nrf24L01_is_data_sent(status)) {
+		// blink LED fast when TX data sent
+		PORTF.OUTCLR = PIN5_bm;
+		_delay_ms(50);
+		PORTF.OUTSET = PIN5_bm;
+		_delay_ms(50);
+	}
+	// in AUTO-ACK, TX_DS is only set when the sender receives an ACK
+	// therefore, in the current state, the LEDs are synced to blink for 1s
+	// (because of the back-pressure that the RX gives) the sender just flashes quicker
 	sei();
 }
 
@@ -91,20 +104,32 @@ int main(void) {
 	PORTF.DIR = PIN5_bm; // built-in LED
 	PORTF.OUTSET = PIN5_bm; // turn off LED, connected to pullup
 
-	const bool stream = true; // NOTE: change this value to test both streaming and burst send
+	const bool publisher = false; // NOTE: set true and false on 2 devices to test publisher/subscriber
+	// default init as burst publisher, override later
+	// this is simply done to test that the set tx/rx functions work
 	configure_nrf24L01(&nrf, (nrf24L01Config_t) {
-		.stream = stream, // default TX
+		.stream = false, // default TX
 		.power_up = true,
-		.max_retransmit_interrupt_disabled = true,
 	});
-	nrf24L01_write_register(&nrf, 1, 0); // TEMP: disable ack so our only interrupt is data sent
-	uint8_t data[] = {0xAB, 0xCD}; // 2 bytes
+	uint8_t data[] = {0xAB, 0xCD}; // dummy payload bytes
+	if(publisher) {
+		// we are assuming everything default
+		// TX_ADDR is by default the default address of RX_PW_P0
+		// if we wanted to talk to another pipe, we'd need to change that address
+		nrf24L01_set_publisher_tx_mode(&nrf, true); // streamed publisher
+	} else {
+		nrf24L01_set_subscriber_rx_mode(&nrf);
+		nrf24L01_set_pipe_packet_width(&nrf, RX_PW_P0, PACKET_WIDTH_2BYTES); // must be set to receive data unless dynamic packet size
+	}
+	
+	// POR will ensure these are reset
+	// but as i develop, software resetting does not also reset the nrf24L01
+	nrf24L01_flush(&nrf, !publisher);
+	
 	sei();
     while(1) {
-		if(stream) {
-			nrf24L01_stream_packet(&nrf, PACKET_WIDTH_2BYTES, data);	
-		} else {
-			nrf24L01_send_packet(&nrf, 2, data);
+		if(publisher) {
+			nrf24L01_stream_packet(&nrf, 2, data);
 		}
 		sleep_cpu();
 	}

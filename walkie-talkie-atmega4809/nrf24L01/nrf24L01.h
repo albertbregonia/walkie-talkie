@@ -4,6 +4,11 @@
 #include <util/delay.h>
 #include "constants.h"
 
+// many of these functions are 'static inline'
+// mostly bc in firmware there is usually only going to be one place 
+// where the function is called and only differ by parameters
+// so we try our best to keep things minimal and optimized for the compiler when we can
+
 // helper macros
 #define PINnCTRL_HELPER(pin) PIN##pin##CTRL // allows us to evalute macros first then do text replacement (not to be used externally)
 #define SET_PINnCTRL(port, pin, gc) ((port).PINnCTRL_HELPER(pin) = (gc))
@@ -16,7 +21,7 @@ typedef struct nrf24L01 {
 	uint8_t (*const send_spi)(uint8_t);
 } nrf24L01_t;
 
-// nrf24l01 is active low therefore clear and set are inverted
+// nrf24L01 is active low therefore clear and set are inverted
 // api level: if we want to "select" => true/false
 static inline void nrf24L01_select(const nrf24L01_t* const nrf, const bool active) {
 	const uint8_t mask = (1 << nrf->chip_select_pin_bp);
@@ -67,6 +72,14 @@ static inline uint8_t nrf24L01_read_register(const nrf24L01_t* const nrf, uint8_
 	return miso;
 }
 
+static inline uint8_t nrf24L01_write_register(const nrf24L01_t* const nrf, uint8_t address, uint8_t value) {
+	nrf24L01_select(nrf, true);
+	nrf->send_spi(CMD_W_REGISTER(address));
+	uint8_t miso = nrf->send_spi(value);
+	nrf24L01_select(nrf, false);
+	return miso;
+}
+
 typedef struct nrf24L01ClearStatusHeader {
 	const bool clear_data_ready_interrupt;
 	const bool clear_data_sent_interrupt;
@@ -79,12 +92,19 @@ const nrf24L01ClearStatusHeader_t CLEAR_ALL_HEADER = {
 	.clear_max_retransmit_interrupt = true,
 };
 
-static inline uint8_t nrf24L01_write_register(const nrf24L01_t* const nrf, uint8_t address, uint8_t value) {
-	nrf24L01_select(nrf, true);
-	nrf->send_spi(CMD_W_REGISTER(address));
-	uint8_t miso = nrf->send_spi(value);
-	nrf24L01_select(nrf, false);
-	return miso;
+// helper function to see if the RX_DR bit is set given a STATUS register value
+static inline bool nrf24L01_is_data_ready(const uint8_t status_register_value) {
+	return status_register_value & (1 << STATUS_RX_DR_bp);
+}
+
+// helper function to see if the TX_DS bit is set given a STATUS register value
+static inline bool nrf24L01_is_data_sent(const uint8_t status_register_value) {
+	return status_register_value & (1 << STATUS_TX_DS_bp);
+}
+
+// helper function to see if the MAX_RT bit is set given a STATUS register value
+static inline bool nrf24L01_is_max_retransmit(const uint8_t status_register_value) {
+	return status_register_value & (1 << STATUS_MAX_RT_bp);
 }
 
 static inline uint8_t nrf24L01_clear_irq(const nrf24L01_t* const nrf, nrf24L01ClearStatusHeader_t header) {
@@ -125,7 +145,7 @@ static inline uint8_t nrf24L01Config_to_byte(const nrf24L01Config_t config) {
 	);
 }
 
-void nrf24L01_flush(const nrf24L01_t* const nrf, const bool subscriber) {
+static inline void nrf24L01_flush(const nrf24L01_t* const nrf, const bool subscriber) {
 	nrf24L01_select(nrf, true);
 	nrf->send_spi(subscriber ? CMD_FLUSH_RX : CMD_FLUSH_TX); // FLUSH RX/TX
 	nrf24L01_select(nrf, false);
@@ -170,6 +190,36 @@ static inline void configure_nrf24L01(const nrf24L01_t* const nrf, const nrf24L0
 		nrf24L01_wait_for_power_up();
 		nrf24L01_handle_transceiver_mode_transition(nrf, config.subscriber, config.stream);
 	}
+}
+
+// simple function to handle switching to RX mode by writing to the CONFIG register
+// and setting the correct pin values assuming the nrf24L01's PWR_UP bit is set.
+// this can be wasteful if you need to set multiple values in the CONFIG register
+// as it will do a read-modify-write operation with the nrf24L01.
+// use configure_nrf24L01() to paralleize writes if more than
+// just the PRIM_RX bit needs to be configured
+// it will implicitly enter RX mode if PRIM_RX=1
+static inline void nrf24L01_set_subscriber_rx_mode(const nrf24L01_t* const nrf) {
+	nrf24L01_chip_enable(nrf, false); // go standby
+	uint8_t current_config = nrf24L01_read_register(nrf, REGISTER_CONFIG);
+	current_config |= (1 << CONFIG_PRIM_RX_bp);
+	nrf24L01_write_register(nrf, REGISTER_CONFIG, current_config);
+	nrf24L01_handle_transceiver_mode_transition(nrf, true, false);
+}
+
+// simple function to handle switching to TX mode by writing to the CONFIG register
+// and setting the correct pin values assuming the nrf24L01's PWR_UP bit is set.
+// this can be wasteful if you need to set multiple values in the CONFIG register
+// as it will do a read-modify-write operation with the nrf24L01.
+// use configure_nrf24L01() to paralleize writes if more than
+// just the PRIM_RX bit needs to be configured
+// it will implicitly enter TX mode if PRIM_RX=0
+static inline void nrf24L01_set_publisher_tx_mode(const nrf24L01_t* const nrf, const bool stream) {
+	nrf24L01_chip_enable(nrf, false); // go standby
+	uint8_t current_config = nrf24L01_read_register(nrf, REGISTER_CONFIG);
+	current_config &= ~(1 << CONFIG_PRIM_RX_bp); // clear bit for publisher
+	nrf24L01_write_register(nrf, REGISTER_CONFIG, current_config);
+	nrf24L01_handle_transceiver_mode_transition(nrf, false, stream);
 }
 
 typedef enum nrf24L01Pipe {
@@ -228,8 +278,9 @@ static inline void nrf24L01_set_pipe_packet_width(
 	nrf24L01_write_register(nrf, pipe, width);
 }
 
-// pre-reqs: PWR_UP=1, PRIM_RX=0, CE=1 for at least (10 + 130)us to enter TX mode
-void nrf24L01_stream_packet(
+// pre-reqs: PWR_UP=1, PRIM_RX=0, CE=1 for at least (10 + 130)us to enter TX mode / standby 2
+// NOTE: there is no compile-time guarantee that packet width matches the array passed
+static inline void nrf24L01_stream_packet(
 	const nrf24L01_t* const nrf, 
 	const nrf24L01PipePacketWidth_t size,
 	const uint8_t data[size]
@@ -246,7 +297,8 @@ void nrf24L01_stream_packet(
 // CE will be pulsed long enough to transition to TX mode (11us)
 // but will not wait for TX mode to settle and finish sending
 // this is done so that the dev decides interrupt/polling for flow control
-void nrf24L01_send_packet(
+// NOTE: there is no compile-time guarantee that packet width matches the array passed
+static inline void nrf24L01_send_packet(
 	const nrf24L01_t* const nrf, 
 	const nrf24L01PipePacketWidth_t size, 
 	const uint8_t data[size]
