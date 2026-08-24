@@ -64,7 +64,7 @@ static inline void configure_nrf24L01_pins(const nrf24L01_t* const nrf) {
     _delay_ms(10.3);
 }
 
-static inline uint8_t nrf24L01_read_register(const nrf24L01_t* const nrf, uint8_t address) {
+static inline uint8_t nrf24L01_read_register(const nrf24L01_t* const nrf, const uint8_t address) {
     nrf24L01_select(nrf, true);
     nrf->send_spi(CMD_R_REGISTER(address));
     uint8_t miso = nrf->send_spi(CMD_NOP);
@@ -72,7 +72,7 @@ static inline uint8_t nrf24L01_read_register(const nrf24L01_t* const nrf, uint8_
     return miso;
 }
 
-static inline uint8_t nrf24L01_write_register(const nrf24L01_t* const nrf, uint8_t address, uint8_t value) {
+static inline uint8_t nrf24L01_write_register(const nrf24L01_t* const nrf, const uint8_t address, const uint8_t value) {
     nrf24L01_select(nrf, true);
     nrf->send_spi(CMD_W_REGISTER(address));
     uint8_t miso = nrf->send_spi(value);
@@ -308,6 +308,23 @@ static inline void nrf24L01_send_packet(
     nrf24L01_chip_enable(nrf, true);
     _delay_us(11);
     nrf24L01_chip_enable(nrf, false); // go back to standby
+}
+
+// pre-reqs: PWR_UP=1, PRIM_RX=1
+// reads in a packet from the RX FIFO buffer on the nrf24L01
+// and places the contents into the given buffer
+// NOTE: there is no compile-time guarantee that packet width matches the array passed
+static inline void nrf24L01_read_packet(
+    const nrf24L01_t* const nrf,
+    const nrf24L01PipePacketWidth_t size,
+    uint8_t buffer[size]
+) {
+    nrf24L01_select(nrf, true);
+    nrf->send_spi(CMD_R_RX_PAYLOAD);
+    for(uint8_t i=0; i<size; i++) {
+        buffer[i] = nrf->send_spi(CMD_NOP);
+    }
+    nrf24L01_select(nrf, false);
 }
 
 #endif /* NRF24L01_H_ */

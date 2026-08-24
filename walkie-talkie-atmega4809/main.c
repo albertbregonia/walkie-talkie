@@ -61,41 +61,39 @@ static inline void setup(void) {
 //         .run_standby_enabled = true,
 //         .max_value = PLAYBACK_RATE(48000),
 //     });
-//     configure_adc((ADCConfig_t) {
-//         .adc = &ADC0,
-//         .run_standby_enabled = true,
-//         .resolution = ADC_RESSEL_10BIT_gc,
-//         .freerun_enabled = false,
-//         .result_ready_interrupt_enabled = true,
-//         .pins = ADC_MUXPOS_AIN8_gc,
-//         .prescaler = ADC_PRESC_DIV4_gc, // 2.5 MHz / 2 = 1.25 MHz
-//     });
 //     enable_tcb(&TCB0);
-//     enable_adc(&ADC0);
 }
+
+#define PACKET_SIZE PACKET_WIDTH_2BYTES
 
 ISR(PORTA_PORT_vect) {
     cli();
     PORTA.INTFLAGS |= (1 << NRF24L01_IRQ_PIN_bp); // clear interrupt flag
     uint8_t volatile status = nrf24L01_clear_irq(&nrf, CLEAR_ALL_HEADER);
     if(nrf24L01_is_data_ready(status)) {
-        // blink LED slow when RX recv
-        PORTF.OUTCLR = PIN5_bm;
-        _delay_ms(500);
-        PORTF.OUTSET = PIN5_bm;
-        _delay_ms(500);
-        nrf24L01_flush(&nrf, true); // since we don't read the data, we must flush or else communication stops
+        union { uint16_t word; uint8_t bytes[PACKET_SIZE]; } packet;
+        nrf24L01_read_packet(&nrf, PACKET_SIZE, packet.bytes);
+        // play audio when we get a packet - in an ideal world, assuming no over-the-air latency,
+        // we would send packets at n ksps/kHz and so playing the packet as soon as we get it would have the best quality
+        // however, we don't live in an ideal world and the nrf24L01 has some overhead
+        // when packets are being sent (preamble, address, CRC) according to datasheet
+        mcp4921_write(&mcp4921, (MCP4921Header_t) {
+            .enable = true,
+            .gain_2x_disabled = true,
+            .value = packet.word,
+        });
     }
     if(nrf24L01_is_data_sent(status)) {
-        // blink LED fast when TX data sent
-        PORTF.OUTCLR = PIN5_bm;
-        _delay_ms(50);
-        PORTF.OUTSET = PIN5_bm;
-        _delay_ms(50);
+        start_adc_conversion(&ADC0);
     }
-    // in AUTO-ACK, TX_DS is only set when the sender receives an ACK
-    // therefore, in the current state, the LEDs are synced to blink for 1s
-    // (because of the back-pressure that the RX gives) the sender just flashes quicker
+    sei();
+}
+
+ISR(ADC0_RESRDY_vect) {
+    cli();
+    // use the ADC to sample audio and send packets on the nrf24L01
+    // we should use buffering here but this is just a test
+    nrf24L01_stream_packet(&nrf, PACKET_SIZE, (uint8_t*)&ADC0.RES);
     sei();
 }
 
@@ -105,32 +103,39 @@ int main(void) {
     PORTF.OUTSET = PIN5_bm; // turn off LED, connected to pullup
 
     const bool publisher = false; // NOTE: set true and false on 2 devices to test publisher/subscriber
-    // default init as burst publisher, override later
-    // this is simply done to test that the set tx/rx functions work
+    if(publisher) {
+        configure_adc((ADCConfig_t) {
+            .adc = &ADC0,
+            .run_standby_enabled = true,
+            .resolution = ADC_RESSEL_10BIT_gc,
+            .result_ready_interrupt_enabled = true,
+            .pins = ADC_MUXPOS_AIN8_gc,
+            .prescaler = ADC_PRESC_DIV2_gc, // TODO: 2.5 MHz / (4 * 13 cycles per conversion) = 48 kHz (roughly)
+        });
+        enable_adc(&ADC0);
+    }
+    // configure as streamed publisher if publishers
     configure_nrf24L01(&nrf, (nrf24L01Config_t) {
-        .stream = false, // default TX
+        .stream = publisher,
+        .subscriber = !publisher,
         .power_up = true,
     });
-    uint8_t data[] = {0xAB, 0xCD}; // dummy payload bytes
-    if(publisher) {
-        // we are assuming everything default
-        // TX_ADDR is by default the default address of RX_PW_P0
-        // if we wanted to talk to another pipe, we'd need to change that address
-        nrf24L01_set_publisher_tx_mode(&nrf, true); // streamed publisher
-    } else {
-        nrf24L01_set_subscriber_rx_mode(&nrf);
-        nrf24L01_set_pipe_packet_width(&nrf, RX_PW_P0, PACKET_WIDTH_2BYTES); // must be set to receive data unless dynamic packet size
+    if(!publisher) {
+        // must be set to receive data unless dynamic packet size is configured
+        nrf24L01_set_pipe_packet_width(&nrf, RX_PW_P0, PACKET_SIZE);
     }
     
     // POR will ensure these are reset
     // but as i develop, software resetting does not also reset the nrf24L01
     nrf24L01_flush(&nrf, !publisher);
-    
+    nrf24L01_write_register(&nrf, 0x03, 1); // 3 byte address
+    if(publisher) {
+        // start the first sample
+        start_adc_conversion(&ADC0);
+    }
+
     sei();
     while(1) {
-        if(publisher) {
-            nrf24L01_stream_packet(&nrf, 2, data);
-        }
         sleep_cpu();
     }
 }
