@@ -27,52 +27,52 @@
 
 // MCP4921 payloads are 12-bit, used to clear bits[15:12] for command header
 #define MCP4921_COMMAND_bm 0x0FFF
-	
+    
 typedef struct MCP4921 {
-	const uint8_t chip_select_pin_bp;
-	PORT_t* const chip_select_port;
-	uint8_t (*const send_spi)(uint8_t);
+    const uint8_t chip_select_pin_bp;
+    PORT_t* const chip_select_port;
+    uint8_t (*const send_spi)(uint8_t);
 } MCP4921_t;
 
 typedef struct MCP4921Header {
-	const bool write_disabled;
-	const bool buffered;
-	const bool gain_2x_disabled;
-	const bool enable;
-	const uint16_t value;
+    const bool write_disabled;
+    const bool buffered;
+    const bool gain_2x_disabled;
+    const bool enable;
+    const uint16_t value;
 } MCP4921Header_t;
 
 // MCP4921 is active low therefore clear and set are inverted
 // api level: if we want to "select" => true/false
 static inline void mcp4921_select(const MCP4921_t* const mcp4921, const bool active) {
-	const uint8_t mask = (1 << mcp4921->chip_select_pin_bp);
-	if(active) {
-		mcp4921->chip_select_port->OUT &= ~mask;
-	} else {
-		mcp4921->chip_select_port->OUT |= mask;
-	}
+    const uint8_t mask = (1 << mcp4921->chip_select_pin_bp);
+    if(active) {
+        mcp4921->chip_select_port->OUT &= ~mask;
+    } else {
+        mcp4921->chip_select_port->OUT |= mask;
+    }
 }
 
 static inline void configure_mcp4921(const MCP4921_t* const mcp4921) {
-	// set CSN as output
-	mcp4921->chip_select_port->DIR |= (1 << mcp4921->chip_select_pin_bp);
-	mcp4921_select(mcp4921, false);
+    // set CSN as output
+    mcp4921->chip_select_port->DIR |= (1 << mcp4921->chip_select_pin_bp);
+    mcp4921_select(mcp4921, false);
 }
 
 static inline void mcp4921_write(
-	const MCP4921_t* const mcp4921, 
-	const MCP4921Header_t header
+    const MCP4921_t* const mcp4921, 
+    const MCP4921Header_t header
 ) {
-	const uint16_t value = MCP4921_WRITE_gc |
-		(header.buffered << MCP4921_BUF_bp) |
-		(header.gain_2x_disabled << MCP4921_GAIN_bp) |
-		(header.enable << MCP4921_SHDN_bp) |
-		(MCP4921_COMMAND_bm & header.value); // clear top bits for command header
-		
-	mcp4921_select(mcp4921, true);
-	mcp4921->send_spi(value >> 8);
-	mcp4921->send_spi(value);
-	mcp4921_select(mcp4921, false);
+    const uint16_t value = MCP4921_WRITE_gc |
+        (header.buffered << MCP4921_BUF_bp) |
+        (header.gain_2x_disabled << MCP4921_GAIN_bp) |
+        (header.enable << MCP4921_SHDN_bp) |
+        (MCP4921_COMMAND_bm & header.value); // clear top bits for command header
+        
+    mcp4921_select(mcp4921, true);
+    mcp4921->send_spi(value >> 8);
+    mcp4921->send_spi(value);
+    mcp4921_select(mcp4921, false);
 }
 
 #endif /* MCP4921_H_ */
