@@ -36,7 +36,7 @@
 
 #define CMD_NOP 0xFF // no operation, "might be used to read status register"
 
-// CONFIG register
+// CONFIG register + fields
 #define REGISTER_CONFIG 0x00
 // bit 7 is reserved for 0 only
 #define CONFIG_MASK_RX_DR_bp 6 // default 0, 1 to disable RX_DR interrupt on IRQ
@@ -47,7 +47,7 @@
 #define CONFIG_PWR_UP_bp 1 // default 0, 1 for power up, 0 for power down
 #define CONFIG_PRIM_RX_bp 0 // 1 for subscriber, 0 for publisher, default 0
 
-// STATUS register
+// STATUS register + fields
 #define REGISTER_STATUS 0x07
 // bit 7 is reserved for 0 only
 #define STATUS_RX_DR_bp 6 // data ready interrupt, write 1 to clear
@@ -57,5 +57,39 @@
 // NOTE: data pipe 0b110 is not used and 111 is FIFO empty
 #define STATUS_RX_P_NO(STATUS) ((0b00001110 & STATUS) >> 1) // use this macro to get 0-5 (000-101) 
 #define STATUS_TX_FULL_bp(STATUS) (1 & STATUS) // true if TX FIFO is full
+
+// EN_AA register + fields
+#define REGISTER_EN_AA 0x01
+typedef enum nrf24L01PipeAutoAck {
+    PIPE_AUTOACK_DISABLE_ALL = 0,
+    // TODO: add other bit pos/masks for each pipe P0-P5
+} nrf24L01PipeAutoAck_t;
+
+// SETUP_AW register + fields
+#define REGISTER_SETUP_AW 0x03
+typedef enum nrf24L01PipeAddressWidth { // AW bit field
+    PIPE_ADDRESS_WIDTH_3BYTES = 1,
+    PIPE_ADDRESS_WIDTH_4BYTES, // 2
+    PIPE_ADDRESS_WIDTH_5BYTES, // 3
+    // all other values are illegal
+} nrf24L01PipeAddressWidth_t;
+
+// SETUP_RETR register + fields
+// TODO: macro + API to combine retransmit delay/count
+#define REGISTER_SETUP_RETR 0x04
+// ARD bit field
+typedef enum nrf24L01RetransmitDelay {
+    RETRANSMIT_DELAY_250US = 0,
+    RETRANSMIT_DELAY_500US = 1 << 4,
+    RETRANSMIT_DELAY_750US,
+    // TODO: continues until 0b1111 (high nibble)
+} nrf24L01RetransmitDelay_t;
+
+// ARC bit field
+typedef enum nrf24L01RetransmitCount {
+    RETRANSMIT_COUNT_0 = 0, // disabled
+    RETRANSMIT_COUNT_1,
+    // TODO: continues until 0b1111 (low nibble)
+} nrf24L01RetransmitCount_t;
 
 #endif /* CONSTANTS_H_ */
