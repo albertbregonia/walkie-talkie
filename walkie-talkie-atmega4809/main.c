@@ -17,6 +17,7 @@
 #include "nrf24L01/nrf24L01.h"
 
 #define PLAYBACK_RATE(AUDIO_SAMPLE_RATE) ((F_CPU / AUDIO_SAMPLE_RATE) - 1) 
+#define SAMPLE_RATE 48076 // 20 MHz / (DIV32 prescalar * 13 clock cycles per sample) = 48.076 ksps/kHz
 
 static inline void configure_spi_bus() {
     configure_spi((SPIConfig_t) {
@@ -51,7 +52,6 @@ const nrf24L01_t radio = {
 
 static inline void setup(void) {
     disable_cpu_prescaler();
-    // set_cpu_prescaler(CLKCTRL_PDIV_2X_gc); // enable 2.5 MHz aka 20 MHz / 8
     // we can only use standby bc the ADC does not support SLEEP_MODE_PWR_DOWN
     configure_sleep(SLEEP_MODE_STANDBY);
     configure_spi_bus();
@@ -60,14 +60,14 @@ static inline void setup(void) {
     configure_periodic_interrupt_timer((PeriodicInterruptTimerConfig_t) {
         .timer = &TCB0,
         .run_standby_enabled = true,
-        .max_value = PLAYBACK_RATE(48000), // 20 MHz / (DIV32 prescalar * 13 clock cycles per sample) = 48.076 ksps/kHz
+        .max_value = PLAYBACK_RATE(SAMPLE_RATE),
         .interrupt_enabled = true,
     });
 }
 
 #define PACKET_SIZE PACKET_WIDTH_32BYTES
 #define PACKET_WORD_SIZE (PACKET_SIZE/2)
-#define BUFFER_SIZE (PACKET_WORD_SIZE*191) // fill up the 6KB of SRAM as much as possible, we can buffer 191 packets
+#define BUFFER_SIZE (PACKET_WORD_SIZE*10) // buffer 10 packets, overrun will jump to latest audio
 uint16_t head = 0, tail = 0;
 uint16_t buffer[BUFFER_SIZE];
 
@@ -77,11 +77,11 @@ ISR(PORTA_PORT_vect) {
     uint8_t volatile status = nrf24L01_clear_irq(&radio, CLEAR_ALL_HEADER);
     if(nrf24L01_is_data_ready(status)) {
         PORTF.OUTCLR = PIN5_bm;
-        nrf24L01_read_packet(&radio, PACKET_SIZE, (uint8_t*)(buffer+tail));
-        tail = (tail + PACKET_WORD_SIZE) % BUFFER_SIZE;
-        if(!(TCB0.CTRLA & TCB_ENABLE_bm)) {
-            enable_tcb(&TCB0); // enable playback
+        while(!FIFO_STATUS_IS_RX_EMPTY(nrf24L01_read_register(&radio, REGISTER_FIFO_STATUS))) {
+            nrf24L01_read_packet(&radio, PACKET_SIZE, (uint8_t*)(buffer+tail));
+            tail = (tail + PACKET_WORD_SIZE) % BUFFER_SIZE;
         }
+        enable_tcb(&TCB0); // enable playback
         PORTF.OUTSET = PIN5_bm;
     }
     sei();
@@ -130,7 +130,7 @@ int main(void) {
     PORTF.DIR = PIN5_bm; // built-in LED
     PORTF.OUTSET = PIN5_bm; // turn off LED, connected to pullup
 
-    const bool publisher = false; // NOTE: set true and false on 2 devices to test publisher/subscriber
+    const bool publisher = true; // NOTE: set true and false on 2 devices to test publisher/subscriber
     if(publisher) {
         configure_adc((ADCConfig_t) {
             .adc = &ADC0,
@@ -156,21 +156,21 @@ int main(void) {
     
     // POR will ensure these are reset
     // but as i develop, software resetting does not also reset the nrf24L01
-    nrf24L01_flush(&radio, !publisher);
+    nrf24L01_flush(&radio, true); // flush RX FIFO
+    nrf24L01_flush(&radio, false); // flush TX FIFO
 
     // TODO: custom configs - turn these into abstractions in the HAL
     // these are added to improve audio quality by reducing latency and increasing throughput
+    nrf24L01_write_register(&radio, REGISTER_RF_CH, RF_CH_FREQUENCY(76)); // lowk arbitrary, forums say it avoids interference with wifi
     nrf24L01_write_register(&radio, REGISTER_SETUP_AW, PIPE_ADDRESS_WIDTH_3BYTES); // address width
     nrf24L01_write_register(&radio, REGISTER_EN_AA, PIPE_AUTOACK_DISABLE_ALL); // disable ack
     nrf24L01_write_register(&radio, REGISTER_SETUP_RETR, RETRANSMIT_COUNT_0); // disable retries
 
     if(publisher) {
         // NOTE: audio quality is good but doesn't sound truly like 10-bit 48 kHz
-        // has really good bass and low frequency audio but treble/voice/high frequency
-        // sounds like im playing it on flip phone from the early 2000s
-        // i don't think the nrf24L01 is the bottleneck because its OTA is 2Mbps
-        // i think it's my ADC sampling, i can't get circular buffering + freerun to hit the timings yet
-        // it cannot be the DAC because we've achieved stellar audio quality without the radio just ADC -> DAC
+        // has really good bass and low frequency audio but treble/voice/high frequency caps out
+        // whispy / breathiness of the voice gets crunched and squares-waves out but is very minor.
+        // im still working on figuring out if this is the true bottleneck or if performance can be improved
         nrf24L01_select(&radio, true);
         radio.send_spi(CMD_W_TX_PAYLOAD);
         // start the first sample

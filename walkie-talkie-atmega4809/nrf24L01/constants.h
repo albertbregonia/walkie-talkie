@@ -92,4 +92,9 @@ typedef enum nrf24L01RetransmitCount {
     // TODO: continues until 0b1111 (low nibble)
 } nrf24L01RetransmitCount_t;
 
+#define REGISTER_RF_CH 0x05
+#define RF_CH_FREQUENCY(FREQ) ((FREQ > 125) ? 125 : FREQ) // range is 2.4 - 2.525GHz, therefore clamp to 0-125
+
+#define REGISTER_FIFO_STATUS 0x17
+#define FIFO_STATUS_IS_RX_EMPTY(STATUS) (STATUS & 0x01) // RX_EMPTY is 0 when there is data
 #endif /* CONSTANTS_H_ */
