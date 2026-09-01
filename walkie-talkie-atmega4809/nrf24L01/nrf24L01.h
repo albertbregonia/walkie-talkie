@@ -201,7 +201,8 @@ static inline void configure_nrf24L01(const nrf24L01_t* const nrf, const nrf24L0
 // it will implicitly enter RX mode if PRIM_RX=1
 static inline void nrf24L01_set_subscriber_rx_mode(const nrf24L01_t* const nrf) {
     nrf24L01_chip_enable(nrf, false); // go standby
-    uint8_t current_config = nrf24L01_read_register(nrf, REGISTER_CONFIG);
+    nrf24L01_clear_irq(nrf, CLEAR_ALL_HEADER); // basic software reset
+    uint8_t volatile current_config = nrf24L01_read_register(nrf, REGISTER_CONFIG);
     current_config |= (1 << CONFIG_PRIM_RX_bp);
     nrf24L01_write_register(nrf, REGISTER_CONFIG, current_config);
     nrf24L01_handle_transceiver_mode_transition(nrf, true, false);
@@ -216,6 +217,7 @@ static inline void nrf24L01_set_subscriber_rx_mode(const nrf24L01_t* const nrf) 
 // it will implicitly enter TX mode if PRIM_RX=0
 static inline void nrf24L01_set_publisher_tx_mode(const nrf24L01_t* const nrf, const bool stream) {
     nrf24L01_chip_enable(nrf, false); // go standby
+    nrf24L01_clear_irq(nrf, CLEAR_ALL_HEADER); // basic software reset
     uint8_t current_config = nrf24L01_read_register(nrf, REGISTER_CONFIG);
     current_config &= ~(1 << CONFIG_PRIM_RX_bp); // clear bit for publisher
     nrf24L01_write_register(nrf, REGISTER_CONFIG, current_config);
@@ -278,6 +280,15 @@ static inline void nrf24L01_set_pipe_packet_width(
     nrf24L01_write_register(nrf, pipe, width);
 }
 
+static inline void nrf24L01_start_packet(const nrf24L01_t* const nrf) {
+    nrf24L01_select(nrf, true);
+    nrf->send_spi(CMD_W_TX_PAYLOAD);
+}
+
+static inline void nrf24L01_end_packet(const nrf24L01_t* const nrf) {
+    nrf24L01_select(nrf, false);
+}
+
 // pre-reqs: PWR_UP=1, PRIM_RX=0, CE=1 for at least (10 + 130)us to enter TX mode / standby 2
 // NOTE: there is no compile-time guarantee that packet width matches the array passed
 static inline void nrf24L01_stream_packet(
@@ -285,12 +296,11 @@ static inline void nrf24L01_stream_packet(
     const nrf24L01PipePacketWidth_t size,
     const uint8_t data[size]
 ) {
-    nrf24L01_select(nrf, true);
-    nrf->send_spi(CMD_W_TX_PAYLOAD);
+    nrf24L01_start_packet(nrf);
     for(uint8_t i=0; i<size; i++) {
         nrf->send_spi(data[i]);
     }
-    nrf24L01_select(nrf, false);
+    nrf24L01_end_packet(nrf);
 }
 
 // pre-reqs: PWR_UP=1, PRIM_RX=0

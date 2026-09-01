@@ -18,8 +18,9 @@
 
 #define PLAYBACK_RATE(AUDIO_SAMPLE_RATE) ((F_CPU / AUDIO_SAMPLE_RATE) - 1) 
 #define SAMPLE_RATE 48076 // 20 MHz / (DIV32 prescalar * 13 clock cycles per sample) = 48.076 ksps/kHz
+bool volatile publisher = false; // default waits to receive audio
 
-static inline void configure_spi_bus() {
+static inline void configure_spi_bus(void) {
     configure_spi((SPIConfig_t) {
         .spi = &SPI0,
         .master = true,
@@ -50,6 +51,45 @@ const nrf24L01_t radio = {
     .send_spi = send_spi,
 };
 
+// CIRCULAR BUFFER FOR PLAYBACK
+
+#define PACKET_SIZE PACKET_WIDTH_32BYTES
+#define PACKET_WORD_SIZE (PACKET_SIZE/2)
+#define BUFFER_SIZE (PACKET_WORD_SIZE*10) // buffer 10 packets, overrun will jump to latest audio
+uint16_t head = 0, tail = 0;
+uint16_t buffer[BUFFER_SIZE];
+
+static inline void configure_curiosity_nano(void) {
+    PORTF.DIRSET = PIN5_bm; // built-in LED
+    PORTF.OUTSET = PIN5_bm; // turn off LED, connected to pullup
+    
+    PORTF.DIRCLR = PIN6_bm; // PF6 is the pushbutton (usually reset but reused here)
+    PORTF.PIN6CTRL = PORT_ISC_FALLING_gc; // falling interrupt
+}
+
+static inline void configure_radio(void) {
+    // configure as streamed publisher if publisher
+    configure_nrf24L01(&radio, (nrf24L01Config_t) {
+        .stream = publisher,
+        .subscriber = !publisher,
+        .power_up = true,
+    });
+    // must be set to receive data unless dynamic packet size is configured
+    nrf24L01_set_pipe_packet_width(&radio, RX_PW_P0, PACKET_SIZE);
+    
+    // POR will ensure these are reset
+    // but as i develop, software resetting does not also reset the nrf24L01
+    nrf24L01_flush(&radio, true); // flush RX FIFO
+    nrf24L01_flush(&radio, false); // flush TX FIFO
+
+    // TODO: custom configs - turn these into abstractions in the HAL
+    // these are added to improve audio quality by reducing latency and increasing throughput
+    nrf24L01_write_register(&radio, REGISTER_RF_CH, RF_CH_FREQUENCY(76)); // lowk arbitrary, forums say it avoids interference with wifi
+    nrf24L01_write_register(&radio, REGISTER_SETUP_AW, PIPE_ADDRESS_WIDTH_3BYTES); // address width
+    nrf24L01_write_register(&radio, REGISTER_EN_AA, PIPE_AUTOACK_DISABLE_ALL); // disable ack
+    nrf24L01_write_register(&radio, REGISTER_SETUP_RETR, RETRANSMIT_COUNT_0); // disable retries
+}
+
 static inline void setup(void) {
     disable_cpu_prescaler();
     // we can only use standby bc the ADC does not support SLEEP_MODE_PWR_DOWN
@@ -63,13 +103,18 @@ static inline void setup(void) {
         .max_value = PLAYBACK_RATE(SAMPLE_RATE),
         .interrupt_enabled = true,
     });
+    configure_adc((ADCConfig_t) {
+        .adc = &ADC0,
+        .run_standby_enabled = true,
+        .resolution = ADC_RESSEL_10BIT_gc,
+        .freerun_enabled = false,
+        .result_ready_interrupt_enabled = true,
+        .pins = ADC_MUXPOS_AIN8_gc,
+        .prescaler = ADC_PRESC_DIV32_gc, // 20 MHz / (32 * 13 cycles per conversion) = 48 kHz (roughly)
+    });
+    configure_radio();
+    configure_curiosity_nano(); // dev board physical components
 }
-
-#define PACKET_SIZE PACKET_WIDTH_32BYTES
-#define PACKET_WORD_SIZE (PACKET_SIZE/2)
-#define BUFFER_SIZE (PACKET_WORD_SIZE*10) // buffer 10 packets, overrun will jump to latest audio
-uint16_t head = 0, tail = 0;
-uint16_t buffer[BUFFER_SIZE];
 
 ISR(PORTA_PORT_vect) {
     cli();
@@ -113,7 +158,7 @@ ISR(ADC0_RESRDY_vect) {
     if(++tail == PACKET_WORD_SIZE) {
         tail = 0;
         PORTF.OUTCLR = PIN5_bm; // flash LED to indicate sending
-        nrf24L01_select(&radio, false); // deselect to send packet
+        nrf24L01_end_packet(&radio); // send packet
         nrf24L01_select(&radio, true);
         radio.send_spi(CMD_W_TX_PAYLOAD);
         PORTF.OUTSET = PIN5_bm;
@@ -125,58 +170,52 @@ ISR(ADC0_RESRDY_vect) {
     sei();
 }
 
-int main(void) {
-    setup();
-    PORTF.DIR = PIN5_bm; // built-in LED
-    PORTF.OUTSET = PIN5_bm; // turn off LED, connected to pullup
-
-    const bool publisher = true; // NOTE: set true and false on 2 devices to test publisher/subscriber
-    if(publisher) {
-        configure_adc((ADCConfig_t) {
-            .adc = &ADC0,
-            .run_standby_enabled = true,
-            .resolution = ADC_RESSEL_10BIT_gc,
-            .freerun_enabled = false,
-            .result_ready_interrupt_enabled = true,
-            .pins = ADC_MUXPOS_AIN8_gc,
-            .prescaler = ADC_PRESC_DIV32_gc, // 20 MHz / (32 * 13 cycles per conversion) = 48 kHz (roughly)
-        });
-        enable_adc(&ADC0);
-    }
-    // configure as streamed publisher if publishers
-    configure_nrf24L01(&radio, (nrf24L01Config_t) {
-        .stream = publisher,
-        .subscriber = !publisher,
-        .power_up = true,
-    });
-    if(!publisher) {
-        // must be set to receive data unless dynamic packet size is configured
-        nrf24L01_set_pipe_packet_width(&radio, RX_PW_P0, PACKET_SIZE);
+// ISR to control switching RX/TX modes
+ISR(PORTF_PORT_vect) {
+    cli();
+    PORTF.INTFLAGS |= PIN6_bm; // clear interrupt
+    
+     // software debounce, cheap and effective for our use case
+    _delay_ms(20);
+    if(PORTF.IN & PIN6_bm) { // went high not still low
+        sei();
+        return;
     }
     
-    // POR will ensure these are reset
-    // but as i develop, software resetting does not also reset the nrf24L01
+    // switch modes - clear everything as if POR
+    head = tail = 0; // clear buffer
+    ADC0.RES; // clear ADC interrupt (if present)
     nrf24L01_flush(&radio, true); // flush RX FIFO
     nrf24L01_flush(&radio, false); // flush TX FIFO
-
-    // TODO: custom configs - turn these into abstractions in the HAL
-    // these are added to improve audio quality by reducing latency and increasing throughput
-    nrf24L01_write_register(&radio, REGISTER_RF_CH, RF_CH_FREQUENCY(76)); // lowk arbitrary, forums say it avoids interference with wifi
-    nrf24L01_write_register(&radio, REGISTER_SETUP_AW, PIPE_ADDRESS_WIDTH_3BYTES); // address width
-    nrf24L01_write_register(&radio, REGISTER_EN_AA, PIPE_AUTOACK_DISABLE_ALL); // disable ack
-    nrf24L01_write_register(&radio, REGISTER_SETUP_RETR, RETRANSMIT_COUNT_0); // disable retries
-
-    if(publisher) {
+    
+    if(publisher) { 
+        // make subscriber
+        publisher = false;
+        ADC0.INTCTRL &= ~ADC_RESRDY_bm; // disable interrupts
+        disable_adc(&ADC0);
+        nrf24L01_select(&radio, false); // send the last packet, it might get thrown out if TX FIFO doesn't contain 32 bytes
+        nrf24L01_set_subscriber_rx_mode(&radio);
+        // IRQ ISR will handle enabling playback
+    } else {
+        // make streamed publisher
+        publisher = true;
+        ADC0.INTCTRL |= ADC_RESRDY_bm; // enable interrupts
+        nrf24L01_set_publisher_tx_mode(&radio, true);
+        disable_tcb(&TCB0);
+        enable_adc(&ADC0);
         // NOTE: audio quality is good but doesn't sound truly like 10-bit 48 kHz
         // has really good bass and low frequency audio but treble/voice/high frequency caps out
-        // whispy / breathiness of the voice gets crunched and squares-waves out but is very minor.
+        // wispy / breathiness of the voice gets crunched and squares-waves out but is very minor.
         // im still working on figuring out if this is the true bottleneck or if performance can be improved
-        nrf24L01_select(&radio, true);
-        radio.send_spi(CMD_W_TX_PAYLOAD);
+        nrf24L01_start_packet(&radio);
         // start the first sample
         start_adc_conversion(&ADC0);
     }
+    sei();
+}
 
+int main(void) {
+    setup();
     sei();
     while(1) {
         sleep_cpu();
