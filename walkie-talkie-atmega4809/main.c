@@ -55,7 +55,7 @@ const nrf24L01_t radio = {
 
 #define PACKET_SIZE PACKET_WIDTH_32BYTES
 #define PACKET_WORD_SIZE (PACKET_SIZE/2)
-#define BUFFER_SIZE (PACKET_WORD_SIZE*10) // buffer 10 packets, overrun will jump to latest audio
+#define BUFFER_SIZE (PACKET_WORD_SIZE*50) // buffer 50 packets, overrun will jump to latest audio
 uint16_t head = 0, tail = 0;
 uint16_t buffer[BUFFER_SIZE];
 
@@ -117,7 +117,6 @@ static inline void setup(void) {
 }
 
 ISR(PORTA_PORT_vect) {
-    cli();
     PORTA.INTFLAGS |= (1 << NRF24L01_IRQ_PIN_bp); // clear interrupt flag
     uint8_t volatile status = nrf24L01_clear_irq(&radio, CLEAR_ALL_HEADER);
     if(nrf24L01_is_data_ready(status)) {
@@ -129,11 +128,9 @@ ISR(PORTA_PORT_vect) {
         enable_tcb(&TCB0); // enable playback
         PORTF.OUTSET = PIN5_bm;
     }
-    sei();
 }
 
 ISR(TCB0_INT_vect) {
-    cli();
     TCB0.INTFLAGS |= TCB_CAPT_bm; // clear interrupt
     if(head != tail) {
         mcp4921_write(&dac, (MCP4921Header_t) {
@@ -145,53 +142,51 @@ ISR(TCB0_INT_vect) {
     } else {
         disable_tcb(&TCB0); // disable playback, buffer exhausted, saves power under no audio sent
     }
-    sei();
 }
 
 // the ADC ISR will continually write to the TX FIFO of the nrf24L01
 // and simply deselect the module to finalize sending the packet once we've queued enough samples
 // as we initialize the module in standby 2 we can hit our timings better
 ISR(ADC0_RESRDY_vect) {
-    cli();
+    if(!publisher) {
+        // simply clear interrupt if we have a leftover sample
+        // if we don't do this, the ISR will infinitely loop
+        ADC0.INTFLAGS |= ADC_RESRDY_bm;
+        return; 
+    }
     radio.send_spi(ADC0.RESL);
     radio.send_spi(ADC0.RESH);
     if(++tail == PACKET_WORD_SIZE) {
         tail = 0;
         PORTF.OUTCLR = PIN5_bm; // flash LED to indicate sending
-        nrf24L01_end_packet(&radio); // send packet
-        nrf24L01_select(&radio, true);
-        radio.send_spi(CMD_W_TX_PAYLOAD);
+        nrf24L01_end_packet(&radio); // finalize and send packet
+        nrf24L01_start_packet(&radio); // start next packet
         PORTF.OUTSET = PIN5_bm;
     }
     // start next sample, must be here so samples are as live as possible
     // if we sample early, the ADC may complete before the ISR finishes
     // thus slowing the audio down
     start_adc_conversion(&ADC0);
-    sei();
 }
 
 // ISR to control switching RX/TX modes
 ISR(PORTF_PORT_vect) {
-    cli();
     PORTF.INTFLAGS |= PIN6_bm; // clear interrupt
     
      // software debounce, cheap and effective for our use case
     _delay_ms(20);
     if(PORTF.IN & PIN6_bm) { // went high not still low
-        sei();
         return;
     }
     
     // switch modes - clear everything as if POR
     head = tail = 0; // clear buffer
-    ADC0.RES; // clear ADC interrupt (if present)
     nrf24L01_flush(&radio, true); // flush RX FIFO
     nrf24L01_flush(&radio, false); // flush TX FIFO
     
     if(publisher) { 
         // make subscriber
         publisher = false;
-        ADC0.INTCTRL &= ~ADC_RESRDY_bm; // disable interrupts
         disable_adc(&ADC0);
         nrf24L01_select(&radio, false); // send the last packet, it might get thrown out if TX FIFO doesn't contain 32 bytes
         nrf24L01_set_subscriber_rx_mode(&radio);
@@ -199,7 +194,6 @@ ISR(PORTF_PORT_vect) {
     } else {
         // make streamed publisher
         publisher = true;
-        ADC0.INTCTRL |= ADC_RESRDY_bm; // enable interrupts
         nrf24L01_set_publisher_tx_mode(&radio, true);
         disable_tcb(&TCB0);
         enable_adc(&ADC0);
@@ -211,7 +205,6 @@ ISR(PORTF_PORT_vect) {
         // start the first sample
         start_adc_conversion(&ADC0);
     }
-    sei();
 }
 
 int main(void) {
