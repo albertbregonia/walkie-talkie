@@ -1,6 +1,47 @@
 # walkie-talkie
 bare-metal firmware for the Atmega4809 to create an ultra low-power walkie-talkie
 
+# High level Operation
+Below is a high level, simplified diagram to describe the operation and communication between two copies of this system.
+
+Like many walkie-talkies, this one operates in half-duplex audio transmission and relies on being intermittently configured as either a sender or a receiver.
+
+The following terminology will be used extensively and each term may be used interchangeably:
+- Sender / Publisher / TX
+- Receiver / Subscriber / RX
+```
+                Sender:                                            Receiver
+--------------------------------------------    --------------------------------------------
+|              Initialization              |    |              Initialization              |
+|  (configures registers and peripherals)  |    |  (configures registers and peripherals)  |
+--------------------------------------------    --------------------------------------------
+                    |                                                  |
+                    v                                                  v
+--------------------------------------------    --------------------------------------------
+|         Wait for incoming packets        |    |         Wait for incoming packets        |
+|  (By default is a receiver and sleeps    |    |  (By default is a receiver and sleeps    |
+|      until data is data is received)     |    |      until data is data is received)     |
+--------------------------------------------    --------------------------------------------
+                    |                                                  |
+                    v                                                  v
+--------------------------------------------    --------------------------------------------
+|         Pushbutton (PF6) is pressed      |    |                                          |
+|  (Signals to switch the operating mode   |    |         Wait for incoming packets        |
+|    to obtain and send audio samples)     |    |                                          |
+--------------------------------------------    --------------------------------------------
+                    |                                                  |
+                    v                                                  v
+--------------------------------------------    --------------------------------------------
+|   Audio samples are taken from the 3.5mm |--->|     Audio is received over the radio     |
+|    aux using the ADC and sent over the   |--->|   and added to buffer of audio samples   |
+|  radio as 32-byte packets (containing 16 |--->|      to play back on a DAC at 48kHz      |
+|48kHz samples per packet for 10-bit audio)|--->|           using a timer counter          |
+--------------------------------------------    --------------------------------------------
+```
+The final step repeats infinitely until connection is lost or the mode switch pushbutton is pressed on each device to invert the roles:
+- Receiver becomes the sender to respond
+- Sender becomes a receiver to hear the response
+
 ## Bill of Materials
 | Category | Part | Note |
 | - | - | - |
@@ -8,7 +49,7 @@ bare-metal firmware for the Atmega4809 to create an ultra low-power walkie-talki
 | DAC | MCP4921 | 12-bit SPI DAC for audio playback that supports 20 MHz SCK (2.5MB/s) |
 | Radio Module | nrf24L01 | 2.4 GHz Radio Transceiver that supports up to 2Mbps data rate over the air) |
 
-## Project structure
+## Project Structure
 This project was built using Microchip Studio v7.0.2594 (despite it being deprecated as I'm very familiar with its debugging/monitoring capabilities)
 - [`./atmega4809`](/walkie-talkie-atmega4809/atmega4809) is a small HAL to create a more readable abstraction over the peripherals and different configurations on the ATmega4809 [(datasheet)](https://ww1.microchip.com/downloads/en/DeviceDoc/ATmega4808-09-DataSheet-DS40002173C.pdf).
 - [`./mcp4921`](/walkie-talkie-atmega4809/mcp4921) is an abstraction for the MCP4921 [(datasheet)](https://ww1.microchip.com/downloads/aemDocuments/documents/OTH/ProductDocuments/DataSheets/22248a.pdf) 12-bit SPI DAC
