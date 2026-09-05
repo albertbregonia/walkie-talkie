@@ -294,7 +294,7 @@ static inline void nrf24L01_end_packet(const nrf24L01_t* const nrf) {
 static inline void nrf24L01_stream_packet(
     const nrf24L01_t* const nrf, 
     const nrf24L01PipePacketWidth_t size,
-    const uint8_t data[size]
+    const uint8_t const data[size]
 ) {
     nrf24L01_start_packet(nrf);
     for(uint8_t i=0; i<size; i++) {
@@ -311,7 +311,7 @@ static inline void nrf24L01_stream_packet(
 static inline void nrf24L01_send_packet(
     const nrf24L01_t* const nrf, 
     const nrf24L01PipePacketWidth_t size, 
-    const uint8_t data[size]
+    const uint8_t const data[size]
 ) {
     nrf24L01_stream_packet(nrf, size, data);
     // pulse CE=1 for 10+ us according to datasheet
@@ -327,12 +327,59 @@ static inline void nrf24L01_send_packet(
 static inline void nrf24L01_read_packet(
     const nrf24L01_t* const nrf,
     const nrf24L01PipePacketWidth_t size,
-    uint8_t buffer[size]
+    uint8_t* const buffer
 ) {
     nrf24L01_select(nrf, true);
     nrf->send_spi(CMD_R_RX_PAYLOAD);
     for(uint8_t i=0; i<size; i++) {
         buffer[i] = nrf->send_spi(CMD_NOP);
+    }
+    nrf24L01_select(nrf, false);
+}
+
+// only RX_ADDR_P0 and RX_ADDR_P1 support setting all 5 bytes of their addresses
+// LSB first
+static inline void nrf24L01_set_rx_addr(
+    const nrf24L01_t* const nrf,
+    const bool is_rx_addr_p0, // false for RX_ADDR_P1
+    const nrf24L01PipeAddressWidth_t size,
+    const uint8_t const custom_addr[size]
+) {
+    nrf24L01_select(nrf, true);
+    nrf->send_spi(CMD_W_REGISTER(is_rx_addr_p0 ? RX_ADDR_P0 : RX_ADDR_P1));
+    for(uint8_t i=0; i<CLAMP_RX_TX_ADDRESS_SIZE(size+2); i++) { // +2 bc the enum uses 1 to represent 3
+        // we clamp address size to 5 just in case, 
+        // even though the enum should be used
+        nrf->send_spi(custom_addr[i]);
+    }
+    nrf24L01_select(nrf, false);
+}
+
+// RX_ADDR_P2-P5 only allow the LSB to be set and re-use the 4 MSBs from P1
+// the API is designed this way to enforce this awareness.
+// if used with RX_ADDR_P0-P1, only the LSB will be modified as it is written first anyways
+static inline void nrf24L01_set_rx_addr_lsb(
+    const nrf24L01_t* const nrf,
+    const nrf24L01PipeAddress_t pipe, // no validation if outside of range
+    const uint8_t lsb
+) {
+    nrf24L01_select(nrf, true);
+    nrf->send_spi(CMD_W_REGISTER(pipe));
+    nrf->send_spi(lsb);
+    nrf24L01_select(nrf, false);
+}
+
+static inline void nrf24L01_set_tx_addr(
+    const nrf24L01_t* const nrf,
+    const nrf24L01PipeAddressWidth_t size, // clamped to 5 bytes if out of range
+    const uint8_t const custom_addr[size]
+) {
+    nrf24L01_select(nrf, true);
+    nrf->send_spi(CMD_W_REGISTER(TX_ADDR));
+    for(uint8_t i=0; i<CLAMP_RX_TX_ADDRESS_SIZE(size+2); i++) { // +2 bc the enum uses 1 to represent 3
+        // we clamp address size to 5 just in case,
+        // even though the enum should be used
+        nrf->send_spi(custom_addr[i]);
     }
     nrf24L01_select(nrf, false);
 }

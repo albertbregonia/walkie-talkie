@@ -74,6 +74,8 @@ typedef enum nrf24L01PipeAddressWidth { // AW bit field
     // all other values are illegal
 } nrf24L01PipeAddressWidth_t;
 
+#define CLAMP_RX_TX_ADDRESS_SIZE(SIZE) ((SIZE > 5) ? 5 : SIZE)
+
 // SETUP_RETR register + fields
 // TODO: macro + API to combine retransmit delay/count
 #define REGISTER_SETUP_RETR 0x04
@@ -97,4 +99,16 @@ typedef enum nrf24L01RetransmitCount {
 
 #define REGISTER_FIFO_STATUS 0x17
 #define FIFO_STATUS_IS_RX_EMPTY(STATUS) (STATUS & 0x01) // RX_EMPTY is 0 when there is data
+
+typedef enum nrf24L01PipeAddress {
+    RX_ADDR_P0 = 0x0A,
+    RX_ADDR_P1,
+    RX_ADDR_P2,
+    RX_ADDR_P3,
+    RX_ADDR_P4,
+    RX_ADDR_P5, // 0x0F
+    // all other values are illegal
+} nrf24L01PipeAddress_t;
+
+#define TX_ADDR 0x10
 #endif /* CONSTANTS_H_ */

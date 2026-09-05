@@ -88,6 +88,13 @@ static inline void configure_radio(void) {
     nrf24L01_write_register(&radio, REGISTER_SETUP_AW, PIPE_ADDRESS_WIDTH_3BYTES); // address width
     nrf24L01_write_register(&radio, REGISTER_EN_AA, PIPE_AUTOACK_DISABLE_ALL); // disable ack
     nrf24L01_write_register(&radio, REGISTER_SETUP_RETR, RETRANSMIT_COUNT_0); // disable retries
+    
+    // currently, the RX and TX addresses must be the same
+    // this is because the TX address for the sender must be the RX address on the receiver
+    // 0x8967452301 bc little endian but the nrf24L01 will only use the 3 LSBytes 0x452301 (as we've configured above)
+    uint8_t address[] = { 0x01, 0x23, 0x45, 0x67, 0x89 };
+    nrf24L01_set_tx_addr(&radio, PIPE_ADDRESS_WIDTH_5BYTES, address);
+    nrf24L01_set_rx_addr(&radio, true, PIPE_ADDRESS_WIDTH_5BYTES, address);
 }
 
 static inline void setup(void) {
