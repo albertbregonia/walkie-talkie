@@ -384,4 +384,37 @@ static inline void nrf24L01_set_tx_addr(
     nrf24L01_select(nrf, false);
 }
 
+// sets RX/TX address field width:
+// meaning we can only receive/send to/from transceivers
+// that also have the same address width
+// NOTE: performs no validation on the address width
+// datasheet indicates that 0 and >3 (underlying binary) for size is illegal
+static inline void nrf24L01_set_address_width(
+    const nrf24L01_t* const nrf,
+    const nrf24L01PipeAddressWidth_t size
+) {
+    nrf24L01_write_register(nrf, REGISTER_SETUP_AW, size);
+}
+
+// sets RF frequency offset, datasheet indices it supports only
+// 2.400 GHz - 2.525GHz and is therefore represented as an offset from 0-125
+// NOTE: will clamp for offsets > 125
+static inline void nrf24L01_set_rf_frequency(
+    const nrf24L01_t* const nrf,
+    const uint8_t offset
+) {
+    // since we're using a uint8_t < 0 is invalid inherently
+    nrf24L01_write_register(nrf, REGISTER_RF_CH, (offset > 125) ? 125 : offset);
+}
+
+// sets transmit on fail of auto-ack (AA in datasheet)
+// can be disabled with value 0 but allows up to 15 attempts
+// NOTE: will clamp for counts > 15
+static inline void nrf24L01_set_retransmit_count(
+    const nrf24L01_t* const nrf,
+    const nrf24L01RetransmitCount_t count
+) {
+    nrf24L01_write_register(nrf, REGISTER_SETUP_RETR, (count > 15) ? 15 : count);
+}
+
 #endif /* NRF24L01_H_ */

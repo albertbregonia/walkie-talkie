@@ -91,11 +91,23 @@ typedef enum nrf24L01RetransmitDelay {
 typedef enum nrf24L01RetransmitCount {
     RETRANSMIT_COUNT_0 = 0, // disabled
     RETRANSMIT_COUNT_1,
-    // TODO: continues until 0b1111 (low nibble)
+    RETRANSMIT_COUNT_2,
+    RETRANSMIT_COUNT_3,
+    RETRANSMIT_COUNT_4,
+    RETRANSMIT_COUNT_5,
+    RETRANSMIT_COUNT_6,
+    RETRANSMIT_COUNT_7,
+    RETRANSMIT_COUNT_8,
+    RETRANSMIT_COUNT_9,
+    RETRANSMIT_COUNT_10,
+    RETRANSMIT_COUNT_11,
+    RETRANSMIT_COUNT_12,
+    RETRANSMIT_COUNT_13,
+    RETRANSMIT_COUNT_14,
+    RETRANSMIT_COUNT_15, // 0b1111 or 0x0F low nibble
 } nrf24L01RetransmitCount_t;
 
 #define REGISTER_RF_CH 0x05
-#define RF_CH_FREQUENCY(FREQ) ((FREQ > 125) ? 125 : FREQ) // range is 2.4 - 2.525GHz, therefore clamp to 0-125
 
 #define REGISTER_FIFO_STATUS 0x17
 #define FIFO_STATUS_IS_RX_EMPTY(STATUS) (STATUS & 0x01) // RX_EMPTY is 0 when there is data
