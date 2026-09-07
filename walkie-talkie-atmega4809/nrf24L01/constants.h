@@ -60,10 +60,16 @@
 
 // EN_AA register + fields
 #define REGISTER_EN_AA 0x01
-typedef enum nrf24L01PipeAutoAck {
-    PIPE_AUTOACK_DISABLE_ALL = 0,
-    // TODO: add other bit pos/masks for each pipe P0-P5
-} nrf24L01PipeAutoAck_t;
+
+typedef enum EN_AA_Bitfields {
+    // 7:6 is 00 only
+    ENAA_P0_bp = 0,
+    ENAA_P1_bp,
+    ENAA_P2_bp,
+    ENAA_P3_bp,
+    ENAA_P4_bp,
+    ENAA_P5_bp, // 5 bp
+} EN_AA_bitfields_t;
 
 // SETUP_AW register + fields
 #define REGISTER_SETUP_AW 0x03

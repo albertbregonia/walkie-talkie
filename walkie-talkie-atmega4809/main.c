@@ -85,7 +85,7 @@ static inline void configure_radio(void) {
     // these are added to improve audio quality by reducing latency and increasing throughput
     nrf24L01_set_rf_frequency(&radio, 76); // lowk arbitrary, forums say it avoids interference with wifi
     nrf24L01_set_address_width(&radio, PIPE_ADDRESS_WIDTH_3BYTES);
-    nrf24L01_write_register(&radio, REGISTER_EN_AA, PIPE_AUTOACK_DISABLE_ALL); // disable ack TODO: add abstraction to HAL
+    nrf24L01_enable_autoack(&radio, (nrf24L01PipeAutoAckConfig_t) {}); // disable auto ack
     nrf24L01_set_retransmit_count(&radio, RETRANSMIT_COUNT_0); // disable retries
     
     // currently, the RX and TX addresses must be the same

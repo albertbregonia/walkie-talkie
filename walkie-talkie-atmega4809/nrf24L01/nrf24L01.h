@@ -417,4 +417,27 @@ static inline void nrf24L01_set_retransmit_count(
     nrf24L01_write_register(nrf, REGISTER_SETUP_RETR, (count > 15) ? 15 : count);
 }
 
+typedef struct nrf24L01PipeAutoAckConfig {
+    const bool enable_autoack_p5;
+    const bool enable_autoack_p4;
+    const bool enable_autoack_p3;
+    const bool enable_autoack_p2;
+    const bool enable_autoack_p1;
+    const bool enable_autoack_p0;
+} nrf24L01PipeAutoAckConfig_t;
+
+static inline void nrf24L01_enable_autoack(
+    const nrf24L01_t* const nrf,
+    const nrf24L01PipeAutoAckConfig_t config
+) {
+    nrf24L01_write_register(nrf, REGISTER_EN_AA, (
+        (config.enable_autoack_p5 << ENAA_P5_bp) |
+        (config.enable_autoack_p4 << ENAA_P4_bp) |
+        (config.enable_autoack_p3 << ENAA_P3_bp) |
+        (config.enable_autoack_p2 << ENAA_P2_bp) |
+        (config.enable_autoack_p1 << ENAA_P1_bp) |
+        (config.enable_autoack_p0 << ENAA_P0_bp)
+    ));
+}
+
 #endif /* NRF24L01_H_ */
