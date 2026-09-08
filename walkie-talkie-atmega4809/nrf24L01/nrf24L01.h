@@ -72,6 +72,16 @@ static inline uint8_t nrf24L01_read_register(const nrf24L01_t* const nrf, const 
     return miso;
 }
 
+// cheaper in cycles than nrf24L01_read_register(...)
+// simply because it exploits the property that the STATUS register is always returned
+// simultaneous with the first SPI transaction (datasheet indicates this is idiomatic)
+static inline uint8_t nrf24L01_read_status(const nrf24L01_t* const nrf) {
+    nrf24L01_select(nrf, true);
+    uint8_t miso = nrf->send_spi(CMD_NOP);
+    nrf24L01_select(nrf, false);
+    return miso;
+}
+
 static inline uint8_t nrf24L01_write_register(const nrf24L01_t* const nrf, const uint8_t address, const uint8_t value) {
     nrf24L01_select(nrf, true);
     nrf->send_spi(CMD_W_REGISTER(address));
@@ -86,7 +96,7 @@ typedef struct nrf24L01ClearStatusHeader {
     const bool clear_max_retransmit_interrupt;
 } nrf24L01ClearStatusHeader_t;
 
-const nrf24L01ClearStatusHeader_t CLEAR_ALL_HEADER = {
+const nrf24L01ClearStatusHeader_t IRQ_CLEAR_ALL_HEADER = {
     .clear_data_ready_interrupt = true,
     .clear_data_sent_interrupt = true,
     .clear_max_retransmit_interrupt = true,
@@ -182,7 +192,7 @@ static inline void nrf24L01_handle_transceiver_mode_transition(
 // will also use the nrf24L01Config_t type to optimize writing to the register
 static inline void configure_nrf24L01(const nrf24L01_t* const nrf, const nrf24L01Config_t config) {
     nrf24L01_chip_enable(nrf, false); // go standby to configure
-    nrf24L01_clear_irq(nrf, CLEAR_ALL_HEADER); // basic software reset
+    nrf24L01_clear_irq(nrf, IRQ_CLEAR_ALL_HEADER); // basic software reset
     nrf24L01_write_register(nrf, REGISTER_CONFIG, nrf24L01Config_to_byte(config));
     
     // extra operations that need to be executed based on config
@@ -201,7 +211,7 @@ static inline void configure_nrf24L01(const nrf24L01_t* const nrf, const nrf24L0
 // it will implicitly enter RX mode if PRIM_RX=1
 static inline void nrf24L01_set_subscriber_rx_mode(const nrf24L01_t* const nrf) {
     nrf24L01_chip_enable(nrf, false); // go standby
-    nrf24L01_clear_irq(nrf, CLEAR_ALL_HEADER); // basic software reset
+    nrf24L01_clear_irq(nrf, IRQ_CLEAR_ALL_HEADER); // basic software reset
     uint8_t volatile current_config = nrf24L01_read_register(nrf, REGISTER_CONFIG);
     current_config |= (1 << CONFIG_PRIM_RX_bp);
     nrf24L01_write_register(nrf, REGISTER_CONFIG, current_config);
@@ -217,7 +227,7 @@ static inline void nrf24L01_set_subscriber_rx_mode(const nrf24L01_t* const nrf) 
 // it will implicitly enter TX mode if PRIM_RX=0
 static inline void nrf24L01_set_publisher_tx_mode(const nrf24L01_t* const nrf, const bool stream) {
     nrf24L01_chip_enable(nrf, false); // go standby
-    nrf24L01_clear_irq(nrf, CLEAR_ALL_HEADER); // basic software reset
+    nrf24L01_clear_irq(nrf, IRQ_CLEAR_ALL_HEADER); // basic software reset
     uint8_t current_config = nrf24L01_read_register(nrf, REGISTER_CONFIG);
     current_config &= ~(1 << CONFIG_PRIM_RX_bp); // clear bit for publisher
     nrf24L01_write_register(nrf, REGISTER_CONFIG, current_config);

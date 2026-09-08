@@ -17,7 +17,7 @@
 #include "nrf24L01/nrf24L01.h"
 
 #define PLAYBACK_RATE(AUDIO_SAMPLE_RATE) ((F_CPU / AUDIO_SAMPLE_RATE) - 1) 
-#define SAMPLE_RATE 48076 // 20 MHz / (DIV32 prescalar * 13 clock cycles per sample) = 48.076 ksps/kHz
+#define SAMPLE_RATE 48077 // 20 MHz / (DIV32 prescalar * 13 clock cycles per sample) = 48.076 ksps/kHz
 bool volatile publisher = false; // default waits to receive audio
 
 static inline void configure_spi_bus(void) {
@@ -117,26 +117,33 @@ static inline void setup(void) {
         .result_ready_interrupt_enabled = true,
         .pins = ADC_MUXPOS_AIN8_gc,
         .prescaler = ADC_PRESC_DIV32_gc, // 20 MHz / (32 * 13 cycles per conversion) = 48 kHz (roughly)
+        .voltage_reference = ADC_REFSEL_VDDREF_gc // DAC uses VDD so scale accordingly
     });
     configure_radio();
     configure_curiosity_nano(); // dev board physical components
 }
 
-ISR(PORTA_PORT_vect) {
+ISR(PORTA_PORT_vect, ISR_NAKED) {
     PORTA.INTFLAGS |= (1 << NRF24L01_IRQ_PIN_bp); // clear interrupt flag
-    uint8_t volatile status = nrf24L01_clear_irq(&radio, CLEAR_ALL_HEADER);
+    uint8_t status = nrf24L01_read_status(&radio);
     if(nrf24L01_is_data_ready(status)) {
         PORTF.OUTCLR = PIN5_bm;
-        while(!FIFO_STATUS_IS_RX_EMPTY(nrf24L01_read_register(&radio, REGISTER_FIFO_STATUS))) {
+        // datasheet indicates this is proper operation
+        // i don't normally use do-whiles but the description read like one
+        do {
             nrf24L01_read_packet(&radio, PACKET_SIZE, (uint8_t*)(buffer+tail));
             tail = (tail + PACKET_WORD_SIZE) % BUFFER_SIZE;
-        }
+            nrf24L01_clear_irq(&radio, IRQ_CLEAR_ALL_HEADER);
+        } while(!FIFO_STATUS_IS_RX_EMPTY(nrf24L01_read_register(&radio, REGISTER_FIFO_STATUS)));
         enable_tcb(&TCB0); // enable playback
         PORTF.OUTSET = PIN5_bm;
     }
+    // NOTE: for some reason TX_DS should fire but never does despite packets being sent
+    // datasheet indicates ack or not it should fire but i suppose it is because i hold CE=1 all the time
+    reti();
 }
 
-ISR(TCB0_INT_vect) {
+ISR(TCB0_INT_vect, ISR_NAKED) {
     TCB0.INTFLAGS |= TCB_CAPT_bm; // clear interrupt
     if(head != tail) {
         mcp4921_write(&dac, (MCP4921Header_t) {
@@ -148,31 +155,33 @@ ISR(TCB0_INT_vect) {
     } else {
         disable_tcb(&TCB0); // disable playback, buffer exhausted, saves power under no audio sent
     }
+    reti();
 }
 
 // the ADC ISR will continually write to the TX FIFO of the nrf24L01
 // and simply deselect the module to finalize sending the packet once we've queued enough samples
 // as we initialize the module in standby 2 we can hit our timings better
-ISR(ADC0_RESRDY_vect) {
+ISR(ADC0_RESRDY_vect, ISR_NAKED) {
     if(!publisher) {
         // simply clear interrupt if we have a leftover sample
         // if we don't do this, the ISR will infinitely loop
         ADC0.INTFLAGS |= ADC_RESRDY_bm;
-        return; 
+    } else {
+        radio.send_spi(ADC0.RESL);
+        radio.send_spi(ADC0.RESH);
+        if(++tail == PACKET_WORD_SIZE) {
+            tail = 0;
+            PORTF.OUTCLR = PIN5_bm; // flash LED to indicate sending
+            nrf24L01_end_packet(&radio); // finalize and send packet
+            nrf24L01_start_packet(&radio); // start next packet
+            PORTF.OUTSET = PIN5_bm;
+        }
+        // start next sample, must be here so samples are as live as possible
+        // if we sample early, the ADC may complete before the ISR finishes
+        // thus slowing the audio down
+        start_adc_conversion(&ADC0);
     }
-    radio.send_spi(ADC0.RESL);
-    radio.send_spi(ADC0.RESH);
-    if(++tail == PACKET_WORD_SIZE) {
-        tail = 0;
-        PORTF.OUTCLR = PIN5_bm; // flash LED to indicate sending
-        nrf24L01_end_packet(&radio); // finalize and send packet
-        nrf24L01_start_packet(&radio); // start next packet
-        PORTF.OUTSET = PIN5_bm;
-    }
-    // start next sample, must be here so samples are as live as possible
-    // if we sample early, the ADC may complete before the ISR finishes
-    // thus slowing the audio down
-    start_adc_conversion(&ADC0);
+    reti();
 }
 
 // ISR to control switching RX/TX modes
