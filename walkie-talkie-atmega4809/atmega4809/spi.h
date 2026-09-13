@@ -138,7 +138,7 @@ static inline bool has_buffer_overflow_interrupt(const SPI_t* const spi) {
     return spi->INTFLAGS & SPI_BUFOVF_bm;
 }
 
-static inline uint8_t send_spi_poll_completion_non_buffer(SPI_t* const spi, const uint8_t mosi) {
+static inline uint8_t send_spi_blocking_non_buffer(SPI_t* const spi, const uint8_t mosi) {
     spi->DATA = mosi;
     while(!has_non_buffer_mode_interrupt(spi)); // wait until completion
     // SPI_IF_bm is auto-cleared by reading SPI0.DATA when the flag is set

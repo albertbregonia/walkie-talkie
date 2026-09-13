@@ -8,6 +8,7 @@
 #include "atmega4809/adc.h"
 #include "atmega4809/sleep.h"
 #include "atmega4809/periodic_timer.h"
+#include "atmega4809/usart.h"
 
 // peripheral HALs
 #include "mcp4921/mcp4921.h"
@@ -32,7 +33,7 @@ static inline void configure_spi_bus(void) {
 }
 
 uint8_t send_spi(uint8_t mosi) {
-    return send_spi_poll_completion_non_buffer(&SPI0, mosi);
+    return send_spi_blocking_non_buffer(&SPI0, mosi);
 }
 
 // PERIPHERAL CONFIGURATIONS
@@ -128,7 +129,7 @@ ISR(PORTA_PORT_vect, ISR_NAKED) {
     uint8_t status = nrf24L01_read_status(&radio);
     if(nrf24L01_is_data_ready(status)) {
         PORTF.OUTCLR = PIN5_bm;
-        // datasheet indicates this is proper operation
+        // datasheet indicates this is the idiomatic workflow
         // i don't normally use do-whiles but the description read like one
         do {
             nrf24L01_read_packet(&radio, PACKET_SIZE, (uint8_t*)(buffer+tail));
@@ -223,10 +224,13 @@ ISR(PORTF_PORT_vect) {
 }
 
 int main(void) {
-    setup();
+    // setup();
+    disable_cpu_prescaler();
+    configure_debug_usart();
     sei();
     while(1) {
-        sleep_cpu();
+        usart_send_msg_blocking(&USART3, "this is a test message from USART3 to virtual COM port\n\r");
+        // sleep_cpu();
     }
 }
 
