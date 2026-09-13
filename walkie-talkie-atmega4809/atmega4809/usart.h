@@ -35,11 +35,11 @@ typedef struct USARTConfig {
     const bool multiprocessor_communication_mode_enabled; // MPCM
     
     // CTRLC
-    // MSPI/IRCOM cannot be used here, those will use separate configuration structs / functions
+    // TODO: MSPI/IRCOM cannot be used here, those will use separate configuration structs / functions
     const bool synchronous; // CMODE 
     const USART_PMODE_t parity_mode; // PMODE
     const USART_SBMODE_t stop_bit_mode; // SBMODE
-    const USART_CHSIZE_t character_size; // CHSIZE - 5bit default as opposed to 8bit as 0x00 is 5bit
+    const USART_CHSIZE_t character_size; // CHSIZE - 5bit default as opposed to 8bit as USART_CHSIZE_5BIT_gc is 0x00
     
     // BAUD
     const uint32_t baud; // this is desired baud rate not baud register value
@@ -73,13 +73,12 @@ static inline void configure_usart(const USARTConfig_t config) {
         (config.stop_bit_mode) |
         (config.character_size);
     
-    // S according to datasheet formula
-    // async normal = 16
-    // async double speed = 8
-    const uint8_t samples_per_bit = (config.receiver_mode == USART_RXMODE_CLK2X_gc) 
+    // 'S' value according to datasheet formula
+    const uint8_t samples_per_bit = (config.receiver_mode == USART_RXMODE_CLK2X_gc)
         ? SAMPLES_PER_BIT_ASYNC_DOUBLE 
         : SAMPLES_PER_BIT_ASYNC_NORMAL;
-    config.usart->BAUD = config.synchronous // NEEDS to be >= 64
+    // USARTn.BAUD NEEDS to be >= 64 (datasheet)
+    config.usart->BAUD = config.synchronous
         ? (F_CPU/(2.0*config.baud))
         : (((64.0*F_CPU)/(samples_per_bit*config.baud)));
 }
@@ -95,14 +94,16 @@ static inline void usart_send_byte_blocking(USART_t* const usart, const uint8_t 
     usart->TXDATAL = byte;
 }
 
+// NOTE: this function requires a proper c-string with a null terminator aka [0, '\0', NULL]
+// or else it will continue past the proper memory region
 static inline void usart_send_msg_blocking(USART_t* const usart, const char* const msg) {
     for(int i=0; msg[i] != 0; i++) {
         usart_send_byte_blocking(usart, msg[i]);
     }
 }
 
-// TEMP: test function to configure USART3 and trigger the above ISR
-static inline void configure_debug_usart() {
+// TEMP: test function to configure USART3 and send a string with `usart_send_msg_blocking`
+static inline void configure_debug_usart(void) {
     configure_usart((USARTConfig_t) {
         .usart = &USART3, // connected to USB on curiosity nano
         .receiver_enabled = true,
@@ -110,7 +111,7 @@ static inline void configure_debug_usart() {
         .character_size = USART_CHSIZE_8BIT_gc,
         .baud = 9600
     });
-    // set USART3 pin directions
+    // set USART3 pin directions, these are the default as i have not set up USARTROUTEA abstraction
     PORTB.DIRSET = PIN0_bm; // TX
     PORTB.DIRCLR = PIN1_bm; // RX
 }
